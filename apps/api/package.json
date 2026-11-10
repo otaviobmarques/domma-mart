@@ -1,0 +1,37 @@
+{
+  "name": "@domma/api",
+  "private": true,
+  "scripts": {
+    "build": "prisma generate && tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json -w --preserveWatchOutput & node --watch dist/main.js",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "node dist/seed.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.22",
+    "@nestjs/core": "^10.4.22",
+    "@nestjs/event-emitter": "^2.1.1",
+    "@nestjs/platform-express": "^10.4.22",
+    "@prisma/client": "^5.22.0",
+    "argon2": "^0.45.2",
+    "bullmq": "^6.7.3",
+    "cookie-parser": "^1.4.7",
+    "ioredis": "^6.0.0",
+    "qrcode": "^1.5.4",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/express": "^4.17.25",
+    "@types/node": "^22.20.5",
+    "@types/qrcode": "^1.5.6",
+    "fast-check": "^3.23.2",
+    "prisma": "^5.22.0",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}
