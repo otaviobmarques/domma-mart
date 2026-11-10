@@ -96,7 +96,8 @@ export class DashboardController {
   }
 
   private async filters(c: ProducerCtx, q: Record<string, string>): Promise<Prisma.ordersWhereInput> {
-    const w: Prisma.ordersWhereInput = { workspace_id: c.workspaceId, status: { notIn: ['created'] } };
+    // por padrão, tentativas recusadas não aparecem como venda (4.2); filtre por status para vê-las
+    const w: Prisma.ordersWhereInput = { workspace_id: c.workspaceId, status: { notIn: ['created', 'failed', 'abandoned'] } };
     if (q.status) w.status = { in: q.status.split(',') as any };
     if (q.method) w.method = q.method as any;
     if (q.from || q.to) w.created_at = { gte: q.from ? new Date(q.from) : undefined, lte: q.to ? new Date(q.to) : undefined };

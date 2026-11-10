@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+html { -webkit-text-size-adjust: 100%; }
+body { background: #F6F4FF; color: #1A1033; font-family: Manrope, system-ui, sans-serif; font-size: 15px; line-height: 1.5; }
+.num { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+:focus-visible { outline: 2px solid #5B3FE6; outline-offset: 2px; border-radius: 6px; }
+input, select, textarea, button { font: inherit; }
+.skeleton { background: linear-gradient(90deg, #ECE8F8 25%, #F4F1FD 50%, #ECE8F8 75%); background-size: 200% 100%; animation: sk 1.2s infinite; border-radius: 8px; }
+@keyframes sk { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none } * { transition: none !important } }
