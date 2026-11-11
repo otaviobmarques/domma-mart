@@ -25,6 +25,7 @@ const Config = z.object({
   rules: z.object(Object.fromEntries(RULE_KEYS.map(k => [k, Rule])) as Record<(typeof RULE_KEYS)[number], typeof Rule>),
   reserve: z.object({ new_account_pct: z.number().int().min(0).max(50), new_account_days: z.number().int().min(1).max(180), account_age_days: z.number().int().min(0).max(365), min_paid_orders: z.number().int().min(0).max(10000) }),
   producer: z.object({ alert_pct: z.number().min(0.1).max(20), review_pct: z.number().min(0.1).max(20), pause_pct: z.number().min(0.1).max(20), min_orders: z.number().int().min(1).max(10000) }),
+  marketplace: z.object({ refund_pct: z.number().min(1).max(100), chargeback_pct: z.number().min(0.1).max(20), min_orders: z.number().int().min(1).max(10000) }),
   reason: Reason,
 });
 const BLOCK_KINDS = ['cpf', 'email', 'email_domain', 'ip', 'device', 'bin'] as const;
@@ -149,7 +150,24 @@ export class RiskController {
 
   /** Roda agora a verificação diária de chargeback dos produtores. */
   @Post('fraud/scan-producers') @Admin('risk.manage') @HttpCode(200)
-  async scan() { return this.risk.scanProducers(); }
+  async scan() { return { ...(await this.risk.scanProducers()), ...(await this.risk.scanMarketplace()) }; }
+
+  /** Tirar da vitrine de afiliados (ou devolver), com motivo. */
+  @Post('products/:id/marketplace') @Admin('risk.manage') @HttpCode(200)
+  async marketplace(@Ctx() c: ProducerCtx, @Param('id') id: string, @Body() b: any) {
+    const d = parse(z.object({ listed: z.boolean(), reason: Reason }), b);
+    const p = await this.prisma.products.findUnique({ where: { id } });
+    if (!p) throw new AppError('NOT_FOUND');
+    await this.prisma.products.update({ where: { id }, data: d.listed ? { marketplace_delisted_at: null, marketplace_delisted_reason: null } : { marketplace_delisted_at: new Date(), marketplace_delisted_reason: d.reason } });
+    await this.audit.log({ actorId: c.userId, action: d.listed ? 'marketplace.relist' : 'marketplace.delist', target: `product:${id}`, reason: d.reason });
+    return { ok: true };
+  }
+
+  @Get('marketplace/delisted') @Admin('risk.manage')
+  async delisted() {
+    const rows = await this.prisma.products.findMany({ where: { marketplace_delisted_at: { not: null } }, include: { workspace: { select: { name: true } } }, orderBy: { marketplace_delisted_at: 'desc' }, take: 100 });
+    return toJSON(rows.map(p => ({ id: p.id, name: p.name, account: p.workspace.name, at: p.marketplace_delisted_at, reason: p.marketplace_delisted_reason })));
+  }
 
   @Post('accounts/:id/payouts') @Admin('risk.manage') @HttpCode(200)
   async payouts(@Ctx() c: ProducerCtx, @Param('id') id: string, @Body() b: any) {

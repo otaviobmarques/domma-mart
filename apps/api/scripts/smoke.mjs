@@ -446,5 +446,77 @@ console.log('\n13) Antifraude: regras, revisão, bloqueios, reserva e chargeback
   await put(cfg0.defaults);
 }
 
+console.log('\n14) Marketplace de afiliados');
+{
+  const P = { cookie: 'prod' }, B = { cookie: 'bru' }, A = { cookie: 'adm' };
+  const lb = await login('afiliado@demo.com', 'Domma@Mart2026', 'bru');
+  ok(lb.status === 200, 'afiliado entra no painel');
+  const conf = (await req('GET', '/v1/products', null, P)).body.find(x => x.name.startsWith('Curso de Confeitaria'));
+  // novo produto da produtora: aprovação manual, na vitrine
+  const np = await req('POST', '/v1/products', { type: 'service', name: `Mentoria de Bolos ${Date.now()}`, price_cents: 49700 }, P);
+  await req('PATCH', `/v1/products/${np.body.product_id}`, { service_url: 'https://agenda.exemplo.com/ana' }, P);
+  ok((await req('POST', `/v1/products/${np.body.product_id}/publish`, null, P)).status < 300, 'produto novo publicado');
+  const noCat = await req('PATCH', `/v1/products/${np.body.product_id}`, { affiliation_enabled: true, marketplace_listed: true }, P);
+  ok(noCat.status === 422 && !!noCat.body.fields?.category, 'vitrine exige categoria');
+  const noAff = await req('PATCH', `/v1/products/${np.body.product_id}`, { marketplace_listed: true, category: 'culinaria' }, P);
+  ok(noAff.status === 422 && !!noAff.body.fields?.marketplace_listed, 'vitrine exige afiliação ativa');
+  const listed = await req('PATCH', `/v1/products/${np.body.product_id}`, { affiliation_enabled: true, affiliation_auto_approve: false, marketplace_listed: true, category: 'culinaria', affiliate_rules: 'Sem promessa de renda.' }, P);
+  ok(listed.status === 200 && listed.body.marketplace_listed === true, 'produtora coloca o produto na vitrine');
+  ok((await req('POST', `/v1/products/${np.body.product_id}/materials`, { kind: 'link', title: 'Criativos', url: 'http://inseguro.exemplo.com' }, P)).status === 422, 'material só com link https');
+  ok((await req('POST', `/v1/products/${np.body.product_id}/materials`, { kind: 'link', title: 'Criativos', url: 'https://drive.exemplo.com/criativos' }, P)).status === 201, 'material de divulgação cadastrado');
+
+  // vitrine do afiliado
+  const vit = (await req('GET', '/v1/marketplace?category=culinaria&sort=commission', null, B)).body;
+  const cv = vit.items.find(x => x.product_id === conf.id), nv = vit.items.find(x => x.product_id === np.body.product_id);
+  ok(cv && cv.my_status === 'active' && cv.earning_cents > 0 && cv.category_label, `vitrine mostra o curso com ganho por venda (${cv?.earning_cents})`);
+  ok(nv && nv.my_status === null && nv.auto_approve === false, 'produto novo aparece para pedir afiliação');
+  ok((await req('GET', `/v1/marketplace?q=${encodeURIComponent('Mentoria de Bolos')}`, null, B)).body.items.some(x => x.product_id === np.body.product_id), 'busca por nome');
+  const det0 = (await req('GET', `/v1/marketplace/${np.body.product_id}`, null, B)).body;
+  ok(det0.materials === null && det0.rules === 'Sem promessa de renda.' && det0.offers[0].link === null, 'antes da afiliação: regras visíveis, materiais e links não');
+  const rq = await req('POST', '/v1/affiliate/request', { product_id: np.body.product_id, message: 'Divulgo no Instagram para confeiteiras', source: 'marketplace' }, B);
+  ok(rq.status === 200 && rq.body.status === 'pending', 'pedido de afiliação com mensagem fica pendente');
+  await sleep(500);
+  const ob = (await req('GET', '/v1/dev/outbox')).body;
+  ok(ob.some(n => n.template === 'affiliation_requested' && n.body.includes('Divulgo no Instagram')), 'produtora recebe o pedido por e-mail com a mensagem');
+  const pdet = (await req('GET', `/v1/products/${np.body.product_id}`, null, P)).body;
+  const pend = pdet.affiliations.find(a => a.status === 'pending');
+  ok(pend?.message === 'Divulgo no Instagram para confeiteiras' && pend.source === 'marketplace', 'produtora vê a mensagem e a origem do pedido');
+  await req('POST', `/v1/affiliations/${pend.id}/approve`, null, P);
+  await sleep(500);
+  ok((await req('GET', '/v1/dev/outbox')).body.some(n => n.template === 'affiliation_approved'), 'afiliado é avisado da aprovação');
+  const det1 = (await req('GET', `/v1/marketplace/${np.body.product_id}`, null, B)).body;
+  ok(det1.my_affiliation.status === 'active' && det1.materials.length === 1 && det1.offers[0].link?.includes('/r/'), 'aprovado: links por oferta e materiais liberados');
+  ok((await req('GET', `/v1/affiliate/materials/${np.body.product_id}`, null, B)).body.materials.length === 1, 'materiais também no painel do afiliado');
+
+  // comissão por oferta entra na divisão da venda
+  const mainOffer = (await req('GET', `/v1/products/${conf.id}`, null, P)).body.offers.find(o => o.slug === 'confeitaria');
+  ok((await req('PATCH', `/v1/offers/${mainOffer.id}`, { affiliate_commission_bps: 5000 }, P)).status === 200, 'produtora define 50% de comissão na oferta');
+  ok((await req('GET', `/v1/marketplace/${conf.id}`, null, B)).body.offers.find(o => o.offer_id === mainOffer.id).commission_bps === 5000, 'vitrine mostra a comissão da oferta');
+  const cpf14 = (() => { const d = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)); for (const n of [9, 10]) { const s = d.reduce((a, x, i) => a + x * (n + 1 - i), 0); d.push((s * 10) % 11 % 10); } return d.join(''); })();
+  const so = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: { ...buyer(20), document: cpf14 }, method: 'pix', affiliate_code: 'bruno' }, { headers: { 'idempotency-key': randomUUID(), 'x-forwarded-for': '203.0.113.77' } }); // comprador em outro IP (o afiliado acabou de entrar daqui: RN-71)
+  const sd = (await req('GET', `/v1/orders/${so.body.order_id}/detail`, null, P)).body;
+  const af = sd.splits.find(x => x.type === 'affiliate'), pl = sd.splits.find(x => x.type === 'platform');
+  ok(af && af.amount_cents === Math.round((sd.total_cents - pl.amount_cents) * 0.5), `comissão de 50% da oferta na divisão (${af?.amount_cents})`);
+  await req('PATCH', `/v1/offers/${mainOffer.id}`, { affiliate_commission_bps: null }, P);
+
+  // ranking
+  const rk = (await req('GET', '/v1/marketplace/ranking', null, B)).body;
+  ok(rk.me && rk.me.position >= 1 && rk.top.some(x => x.me && /^Bruno/.test(x.name)), `ranking do mês mostra a posição do afiliado (${rk.me?.position}º)`);
+  ok(rk.top.every(x => x.me || x.commissions_cents === undefined), 'ranking não mostra o valor das comissões dos outros');
+
+  // retirada da vitrine: pela equipe e automática
+  ok((await req('POST', `/v1/admin/products/${np.body.product_id}/marketplace`, { listed: false, reason: 'Teste de retirada pela equipe' }, A)).status === 200, 'equipe tira produto da vitrine');
+  ok(!(await req('GET', '/v1/marketplace', null, B)).body.items.some(x => x.product_id === np.body.product_id) && (await req('GET', `/v1/marketplace/${np.body.product_id}`, null, B)).status === 404, 'produto retirado some da vitrine');
+  ok((await req('PATCH', `/v1/products/${np.body.product_id}`, { marketplace_listed: true }, P)).status === 422, 'produtora não consegue recolocar sozinha');
+  await req('POST', `/v1/admin/products/${np.body.product_id}/marketplace`, { listed: true, reason: 'Teste: produto devolvido à vitrine' }, A);
+  const cfg = (await req('GET', '/v1/admin/fraud/config', null, A)).body;
+  await req('PUT', '/v1/admin/fraud/config', { ...cfg.defaults, marketplace: { refund_pct: 1, chargeback_pct: 20, min_orders: 1 }, reason: 'Teste automatizado da vitrine' }, A);
+  const sc = (await req('POST', '/v1/admin/fraud/scan-producers', null, A)).body;
+  ok(sc.delisted >= 1 && (await req('GET', '/v1/admin/marketplace/delisted', null, A)).body.some(x => x.id === conf.id), 'reembolso acima do limite tira o produto da vitrine automaticamente');
+  ok((await req('GET', '/v1/admin/fraud/alerts', null, A)).body.some(x => x.kind === 'marketplace_delist'), 'alerta para a equipe de Risco');
+  await req('PUT', '/v1/admin/fraud/config', { ...cfg.defaults, reason: 'Teste automatizado da vitrine' }, A);
+  await req('POST', `/v1/admin/products/${conf.id}/marketplace`, { listed: true, reason: 'Teste: produto devolvido à vitrine' }, A);
+}
+
 console.log(`\n${pass} ok, ${fail} falhas\n`);
 process.exit(fail ? 1 : 0);

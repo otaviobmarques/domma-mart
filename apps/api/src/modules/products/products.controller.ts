@@ -9,6 +9,7 @@ import { parse, z } from '../../http/zod';
 import { AppError } from '../../common/errors';
 import { base62, signToken, verifyToken } from '../../common/crypto';
 import { netPerSale, FEES, formatBRL } from '../../domain/money';
+import { CATEGORY_KEYS, CATEGORIES } from '../../domain/marketplace';
 import { moderationFlags } from '../../domain/validators';
 import { toJSON } from '../../http/json';
 import { urls } from '../../common/urls';
@@ -29,6 +30,7 @@ const OfferPatch = z.object({
   pix_expiration_min: z.number().int().min(10).max(1440).optional(),
   boleto_due_days: z.number().int().min(1).max(7).optional(),
   thank_you_url: z.string().url().startsWith('https://').nullable().optional(),
+  affiliate_commission_bps: z.number().int().min(100).max(9000).nullable().optional(),
   billing_type: z.enum(['one_time', 'subscription']).optional(),
   interval: z.enum(['month', 'quarter', 'semester', 'year']).nullable().optional(),
   trial_days: z.number().int().min(0).max(30).optional(),
@@ -103,6 +105,8 @@ export class ProductsController {
       funnel_candidates: (await this.prisma.offers.findMany({ where: { workspace_id: c.workspaceId, status: 'active', billing_type: 'one_time' }, include: { product: true }, orderBy: { created_at: 'asc' } }))
         .map(o => ({ offer_id: o.id, product_id: o.product_id, name: o.product.name, offer_name: o.name, price_cents: o.price_cents })),
       fee_hint: `Taxa Domma Mart: 4,49% + R$ 1,49 por venda. Sem mensalidade.`,
+      categories: CATEGORIES,
+      materials: await this.prisma.affiliate_materials.findMany({ where: { product_id: id }, orderBy: [{ position: 'asc' }, { created_at: 'asc' }] }),
     });
   }
 
@@ -114,8 +118,19 @@ export class ProductsController {
       service_url: z.string().url().nullable().optional().or(z.literal('')), guarantee_days: z.number().int().min(7).max(365).optional(),
       affiliation_enabled: z.boolean().optional(), affiliation_auto_approve: z.boolean().optional(), affiliate_commission_bps: z.number().int().min(100).max(9000).optional(),
       affiliate_cookie_days: z.number().int().min(1).max(365).optional(), affiliate_attribution: z.enum(['last_click', 'first_click']).optional(),
+      marketplace_listed: z.boolean().optional(), category: z.enum(CATEGORY_KEYS).nullable().optional(), affiliate_rules: z.string().max(2000).nullable().optional(),
     }), b);
+    const cur = await this.prisma.products.findUniqueOrThrow({ where: { id } });
+    if (d.marketplace_listed) {
+      // vitrine: só produto aprovado, com afiliação aberta e categoria
+      const enabled = d.affiliation_enabled ?? cur.affiliation_enabled, category = d.category !== undefined ? d.category : cur.category;
+      if (!enabled) throw new AppError('VALIDATION_ERROR', { fields: { marketplace_listed: 'Ative a afiliação para aparecer na vitrine.' } });
+      if (!category) throw new AppError('VALIDATION_ERROR', { fields: { category: 'Escolha a categoria do produto.' } });
+      if (cur.moderation_status !== 'approved') throw new AppError('VALIDATION_ERROR', { fields: { marketplace_listed: 'O produto precisa estar aprovado e à venda.' } });
+      if (cur.marketplace_delisted_at) throw new AppError('VALIDATION_ERROR', { fields: { marketplace_listed: `Produto retirado da vitrine: ${cur.marketplace_delisted_reason}. Fale com o suporte.` } });
+    }
     const data: any = { ...d };
+    if (d.affiliation_enabled === false) data.marketplace_listed = false;
     if (d.cover_url === '') data.cover_url = null;
     if (d.service_url === '') data.service_url = null;
     const p = await this.prisma.products.update({ where: { id }, data });
@@ -184,7 +199,7 @@ export class ProductsController {
       // RN-47: novo preço vale só para novos assinantes
     }
     const updated = await this.prisma.offers.update({ where: { id }, data });
-    await this.audit.log({ actorId: c.userId, action: 'offer.update', target: `offer:${id}`, before: { price_cents: o.price_cents, methods: o.methods }, after: { price_cents: updated.price_cents, methods: updated.methods } });
+    await this.audit.log({ actorId: c.userId, action: 'offer.update', target: `offer:${id}`, before: { price_cents: o.price_cents, methods: o.methods, affiliate_bps: o.affiliate_commission_bps }, after: { price_cents: updated.price_cents, methods: updated.methods, affiliate_bps: updated.affiliate_commission_bps } });
     return toJSON({ ...updated, net_per_sale_cents: netPerSale(updated.price_cents) });
   }
 
@@ -399,14 +414,43 @@ export class ProductsController {
     this.storage.stream(up.storage_key).pipe(res);
   }
 
+  // ───── Materiais de divulgação para afiliados (marketplace) ─────
+  @Post('products/:id/materials') @Producer('products.edit')
+  async addMaterial(@Ctx() c: ProducerCtx, @Param('id') id: string, @Body() b: any) {
+    await this.own(c, id);
+    const d = parse(z.object({
+      kind: z.enum(['link', 'text']), title: z.string().min(2).max(120),
+      url: z.string().url().startsWith('https://', 'Use um link https://').max(1000).optional(), body: z.string().max(5000).optional(),
+    }), b);
+    if (d.kind === 'link' && !d.url) throw new AppError('VALIDATION_ERROR', { fields: { url: 'Cole o link (pasta de criativos, vídeo, imagens...).' } });
+    if (d.kind === 'text' && !d.body?.trim()) throw new AppError('VALIDATION_ERROR', { fields: { body: 'Escreva o texto (ex.: copy de anúncio, e-mail, roteiro).' } });
+    if ((await this.prisma.affiliate_materials.count({ where: { product_id: id } })) >= 30) throw new AppError('VALIDATION_ERROR', { title: 'Limite de 30 materiais por produto.' });
+    const pos = await this.prisma.affiliate_materials.count({ where: { product_id: id } });
+    return toJSON(await this.prisma.affiliate_materials.create({ data: { product_id: id, kind: d.kind, title: d.title, url: d.kind === 'link' ? d.url : null, body: d.kind === 'text' ? d.body : null, position: pos } }));
+  }
+
+  @Delete('materials/:id') @Producer('products.edit')
+  async removeMaterial(@Ctx() c: ProducerCtx, @Param('id') id: string) {
+    const m = await this.prisma.affiliate_materials.findUnique({ where: { id } });
+    if (!m) throw new AppError('NOT_FOUND');
+    await this.own(c, m.product_id);
+    await this.prisma.affiliate_materials.delete({ where: { id } });
+    return { ok: true };
+  }
+
   // ───── Afiliados do lado do produtor (19.12 e) ─────
   @Post('affiliations/:id/:action') @Producer('affiliates.manage') @HttpCode(200)
   async affAction(@Ctx() c: ProducerCtx, @Param('id') id: string, @Param('action') action: string) {
     const a = await this.prisma.affiliations.findFirst({ where: { id, producer_workspace_id: c.workspaceId } });
     if (!a) throw new AppError('NOT_FOUND');
     if (!['approve', 'block'].includes(action)) throw new AppError('NOT_FOUND');
-    await this.prisma.affiliations.update({ where: { id }, data: { status: action === 'approve' ? 'active' : 'blocked' } }); // RN-74
+    await this.prisma.affiliations.update({ where: { id }, data: { status: action === 'approve' ? 'active' : 'blocked', decided_at: new Date() } }); // RN-74
     await this.audit.log({ actorId: c.userId, action: `affiliation.${action}`, target: `affiliation:${id}` });
+    // pedido pendente decidido: o afiliado fica sabendo
+    if (a.status === 'pending') {
+      const [u, p] = await Promise.all([this.prisma.users.findUnique({ where: { id: a.affiliate_user_id } }), this.prisma.products.findUnique({ where: { id: a.product_id } })]);
+      if (u && p) void this.notify.send({ channel: 'email', to: u.email, template: action === 'approve' ? 'affiliation_approved' : 'affiliation_refused', workspaceId: a.affiliate_workspace_id, refType: 'affiliation', refId: a.id, vars: { produto: p.name, link: `${process.env.APP_URL || ''}/afiliado` } });
+    }
     return { ok: true };
   }
 }

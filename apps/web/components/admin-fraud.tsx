@@ -157,6 +157,9 @@ function Regras() {
       <Card className="space-y-3"><h2 className="font-extrabold">Chargeback do produtor (30 dias)</h2>
         <p className="text-[14px] text-ink-mute">Verificado todo dia. Na pausa, os saques da conta param (as vendas continuam) até a equipe liberar em Contas.</p>
         <div className="grid grid-cols-2 gap-3">{[['alert_pct', 'Alerta a partir de (%)'], ['review_pct', 'Revisão a partir de (%)'], ['pause_pct', 'Pausar saques a partir de (%)'], ['min_orders', 'Só com pelo menos (vendas)']].map(([k, l]) => <Field key={k} label={l} inputMode="decimal" value={String(cfg.producer[k])} onChange={e => setCfg({ ...cfg, producer: { ...cfg.producer, [k]: n(e.target.value) } })} mono />)}</div></Card>
+      <Card className="space-y-3"><h2 className="font-extrabold">Vitrine de afiliados (30 dias)</h2>
+        <p className="text-[14px] text-ink-mute">Verificado todo dia. Produto acima de um dos limites sai da vitrine (afiliados atuais continuam vendendo) e gera alerta. Para devolver, use Risco dos produtores.</p>
+        <div className="grid grid-cols-3 gap-3">{[['refund_pct', 'Reembolso a partir de (%)'], ['chargeback_pct', 'Chargeback a partir de (%)'], ['min_orders', 'Só com pelo menos (vendas)']].map(([k, l]) => <Field key={k} label={l} inputMode="decimal" value={String(cfg.marketplace?.[k] ?? '')} onChange={e => setCfg({ ...cfg, marketplace: { ...cfg.marketplace, [k]: n(e.target.value) } })} mono />)}</div></Card>
     </div>
     <Card className="max-w-xl space-y-3">{msg && <Banner tone={msg.tone}>{msg.text}</Banner>}
       <Textarea label="Motivo da mudança (vai para a auditoria)" value={reason} onChange={e => setReason(e.target.value)} />
@@ -194,10 +197,23 @@ function Bloqueios() {
   </div>);
 }
 
+function ForaDaVitrine() {
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [sel, setSel] = useState<any>(null); const [reason, setReason] = useState('');
+  const load = () => get('/v1/admin/marketplace/delisted').then(setRows);
+  useEffect(() => { load(); }, []);
+  if (!rows || rows.length === 0) return null;
+  return (<Card className="mt-4 p-0"><h2 className="px-5 pt-5 font-extrabold">Fora da vitrine de afiliados</h2>
+    <ul className="mt-2 divide-y divide-line">{rows.map(r => <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3"><div><p className="font-semibold">{r.name} <span className="font-normal text-ink-mute">· {r.account}</span></p><p className="text-[13px] text-ink-mute">{r.reason} · {dateTime(r.at)}</p></div><Button size="sm" variant="secondary" onClick={() => { setSel(r); setReason(''); }}>Devolver à vitrine</Button></li>)}</ul>
+    <Modal open={!!sel} onClose={() => setSel(null)} title={sel ? `Devolver “${sel.name}” à vitrine` : ''} footer={<Button disabled={reason.trim().length < 10} onClick={async () => { await post(`/v1/admin/products/${sel.id}/marketplace`, { listed: true, reason }); setSel(null); load(); }}>Devolver</Button>}>
+      <Textarea label="Motivo (vai para a auditoria)" value={reason} onChange={e => setReason(e.target.value)} />
+    </Modal></Card>);
+}
+
 function Produtores() {
   const [rows, setRows] = useState<any[] | null>(null);
   useEffect(() => { get('/v1/admin/risk').then(setRows); }, []);
   const tone = (l: string) => (l === 'ok' ? 'ok' : l === 'alerta' ? 'warn' : 'bad');
-  return <Card className="p-0">{!rows ? <Skeleton className="m-5 h-24" /> : <table className="w-full text-left text-[14px]"><thead className="border-b border-line bg-canvas/60 text-[12.5px] text-ink-mute"><tr><th className="px-5 py-2">Conta</th><th className="text-right">Pagos (30d)</th><th className="text-right">Chargeback</th><th className="text-right">Reembolso</th><th className="px-5">Nível</th></tr></thead>
-    <tbody className="divide-y divide-line">{rows.map(r => <tr key={r.workspace_id}><td className="px-5 py-2.5 font-semibold">{r.name}{r.paused && <Pill tone="bad">saques pausados</Pill>}</td><td className="num text-right">{r.paid}</td><td className="num text-right">{r.chargeback_pct}%</td><td className="num text-right">{r.refund_pct}%</td><td className="px-5"><Pill tone={tone(r.level)}>{r.level}</Pill>{!r.enough_orders && <span className="ml-2 text-[12.5px] text-ink-mute">poucas vendas</span>}</td></tr>)}</tbody></table>}</Card>;
+  return <><Card className="p-0">{!rows ? <Skeleton className="m-5 h-24" /> : <table className="w-full text-left text-[14px]"><thead className="border-b border-line bg-canvas/60 text-[12.5px] text-ink-mute"><tr><th className="px-5 py-2">Conta</th><th className="text-right">Pagos (30d)</th><th className="text-right">Chargeback</th><th className="text-right">Reembolso</th><th className="px-5">Nível</th></tr></thead>
+    <tbody className="divide-y divide-line">{rows.map(r => <tr key={r.workspace_id}><td className="px-5 py-2.5 font-semibold">{r.name}{r.paused && <Pill tone="bad">saques pausados</Pill>}</td><td className="num text-right">{r.paid}</td><td className="num text-right">{r.chargeback_pct}%</td><td className="num text-right">{r.refund_pct}%</td><td className="px-5"><Pill tone={tone(r.level)}>{r.level}</Pill>{!r.enough_orders && <span className="ml-2 text-[12.5px] text-ink-mute">poucas vendas</span>}</td></tr>)}</tbody></table>}</Card><ForaDaVitrine /></>;
 }

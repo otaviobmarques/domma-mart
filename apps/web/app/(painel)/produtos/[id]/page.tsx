@@ -297,28 +297,60 @@ function Obrigado({ offer, save }: any) {
 }
 
 function Afiliados({ p, save, reload }: any) {
-  const [v, setV] = useState({ affiliation_enabled: p.affiliation_enabled, affiliation_auto_approve: p.affiliation_auto_approve, affiliate_commission_bps: p.affiliate_commission_bps / 100, affiliate_cookie_days: p.affiliate_cookie_days, affiliate_attribution: p.affiliate_attribution });
+  const [v, setV] = useState({ affiliation_enabled: p.affiliation_enabled, affiliation_auto_approve: p.affiliation_auto_approve, affiliate_commission_bps: p.affiliate_commission_bps / 100, affiliate_cookie_days: p.affiliate_cookie_days, affiliate_attribution: p.affiliate_attribution, marketplace_listed: p.marketplace_listed, category: p.category ?? '', affiliate_rules: p.affiliate_rules ?? '' });
+  const [offerBps, setOfferBps] = useState<Record<string, string>>(Object.fromEntries(p.offers.map((o: any) => [o.id, o.affiliate_commission_bps != null ? String(o.affiliate_commission_bps / 100) : ''])));
+  const [m, setM] = useState({ kind: 'link', title: '', url: '', body: '' });
+  const [mErr, setMErr] = useState<string | null>(null);
   const invite = typeof window !== 'undefined' ? `${location.origin}/afiliar/${p.id}` : '';
+  const pending = p.affiliations.filter((a: any) => a.status === 'pending');
+  const Row = ({ a }: any) => (
+    <li className="py-3"><div className="flex min-h-[44px] items-center justify-between gap-2"><span className="min-w-0"><span className="block truncate font-semibold">{a.name}</span><span className="num text-[13px] text-ink-mute">{a.email} · {a.code}{a.source === 'marketplace' ? ' · pela vitrine' : ''}</span></span>
+      <span className="flex flex-none items-center gap-2">{a.status === 'active' ? <Pill tone="ok">Ativo</Pill> : a.status === 'pending' ? <Pill tone="warn">Pendente</Pill> : <Pill tone="bad">Bloqueado</Pill>}
+        {a.status !== 'active' && <Button size="sm" variant="secondary" onClick={async () => { await post(`/v1/affiliations/${a.id}/approve`); reload(); }}>Aprovar</Button>}
+        {a.status !== 'blocked' && <Button size="sm" variant="ghost" className="text-bad" onClick={async () => { await post(`/v1/affiliations/${a.id}/block`); reload(); }}>{a.status === 'pending' ? 'Recusar' : 'Bloquear'}</Button>}</span></div>
+      {a.message && <p className="mt-1 rounded-ctl bg-canvas px-3 py-2 text-[14px] text-ink-soft">“{a.message}”</p>}</li>);
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <Card className="space-y-3">
-        <Toggle label="Aceitar afiliados neste produto" checked={v.affiliation_enabled} onChange={x => setV({ ...v, affiliation_enabled: x })} />
-        {v.affiliation_enabled && <>
-          <Toggle label="Aprovar afiliados automaticamente" checked={v.affiliation_auto_approve} onChange={x => setV({ ...v, affiliation_auto_approve: x })} />
-          <Field label="Comissão (%)" type="number" min={1} max={90} value={v.affiliate_commission_bps} onChange={e => setV({ ...v, affiliate_commission_bps: Number(e.target.value) })} hint="Calculada sobre o valor da venda depois da taxa. Venda por afiliado tem taxa de 6,49% + R$ 1,49." />
-          <Field label="Duração do cookie (dias)" type="number" min={1} max={365} value={v.affiliate_cookie_days} onChange={e => setV({ ...v, affiliate_cookie_days: Number(e.target.value) })} />
-          <Select label="Quem leva a comissão" value={v.affiliate_attribution} onChange={e => setV({ ...v, affiliate_attribution: e.target.value })}><option value="last_click">Último clique</option><option value="first_click">Primeiro clique</option></Select>
-          <div><p className="mb-1 text-[14px] font-semibold">Link de convite para afiliados</p><div className="flex gap-2"><p className="num flex-1 truncate rounded-ctl bg-canvas px-3 py-2.5 text-[13px]">{invite}</p><CopyButton text={invite} size="sm" /></div></div>
-        </>}
-        <Button onClick={() => save(`/v1/products/${p.id}`, { ...v, affiliate_commission_bps: Math.round(v.affiliate_commission_bps * 100) })}>Salvar</Button>
-      </Card>
-      <Card><h2 className="font-extrabold">Afiliados</h2>
-        {p.affiliations.length === 0 ? <p className="mt-2 text-ink-mute">Ninguém se afiliou ainda.</p> : <ul className="mt-2 divide-y divide-line">{p.affiliations.map((a: any) => (
-          <li key={a.id} className="flex min-h-[56px] items-center justify-between gap-2"><span className="min-w-0"><span className="block truncate font-semibold">{a.name}</span><span className="num text-[13px] text-ink-mute">{a.code}</span></span>
-            <span className="flex items-center gap-2">{a.status === 'active' ? <Pill tone="ok">Ativo</Pill> : a.status === 'pending' ? <Pill tone="warn">Pendente</Pill> : <Pill tone="bad">Bloqueado</Pill>}
-              {a.status !== 'active' && <Button size="sm" variant="secondary" onClick={async () => { await post(`/v1/affiliations/${a.id}/approve`); reload(); }}>Aprovar</Button>}
-              {a.status !== 'blocked' && <Button size="sm" variant="ghost" className="text-bad" onClick={async () => { await post(`/v1/affiliations/${a.id}/block`); reload(); }}>Bloquear</Button>}</span></li>))}</ul>}
-      </Card>
+      <div className="space-y-4">
+        <Card className="space-y-3">
+          <Toggle label="Aceitar afiliados neste produto" checked={v.affiliation_enabled} onChange={x => setV({ ...v, affiliation_enabled: x, marketplace_listed: x ? v.marketplace_listed : false })} />
+          {v.affiliation_enabled && <>
+            <Toggle label="Aprovar afiliados automaticamente" checked={v.affiliation_auto_approve} onChange={x => setV({ ...v, affiliation_auto_approve: x })} />
+            <Field label="Comissão (%)" type="number" min={1} max={90} value={v.affiliate_commission_bps} onChange={e => setV({ ...v, affiliate_commission_bps: Number(e.target.value) })} hint="Calculada sobre o valor da venda depois da taxa. Venda por afiliado tem taxa de 6,49% + R$ 1,49." />
+            <Field label="Duração do cookie (dias)" type="number" min={1} max={365} value={v.affiliate_cookie_days} onChange={e => setV({ ...v, affiliate_cookie_days: Number(e.target.value) })} />
+            <Select label="Quem leva a comissão" value={v.affiliate_attribution} onChange={e => setV({ ...v, affiliate_attribution: e.target.value })}><option value="last_click">Último clique</option><option value="first_click">Primeiro clique</option></Select>
+            <div className="border-t border-line pt-3"><p className="font-extrabold">Marketplace de afiliados</p>
+              {p.marketplace_delisted_at ? <Banner tone="bad" className="mt-2">Este produto foi retirado da vitrine: {p.marketplace_delisted_reason}. Fale com o suporte.</Banner> : <>
+                <Toggle label="Mostrar na vitrine para todos os afiliados" hint="Afiliados da Domma Mart encontram o produto e pedem afiliação. Sem isso, só entra quem tem o seu link de convite." checked={v.marketplace_listed} onChange={x => setV({ ...v, marketplace_listed: x })} />
+                {p.moderation_status !== 'approved' && v.marketplace_listed && <p className="text-[13.5px] text-warn">O produto aparece na vitrine quando estiver aprovado e à venda.</p>}
+              </>}
+              <Select label="Categoria" value={v.category} onChange={e => setV({ ...v, category: e.target.value })} className="mt-2"><option value="">Escolha…</option>{Object.entries(p.categories ?? {}).map(([k, l]) => <option key={k} value={k}>{l as string}</option>)}</Select>
+              <Textarea className="mt-2" label="Regras de divulgação (opcional)" value={v.affiliate_rules} onChange={e => setV({ ...v, affiliate_rules: e.target.value.slice(0, 2000) })} hint="O afiliado aceita antes de se afiliar. Ex.: proibido usar a marca em anúncios de busca; não prometer resultados." />
+            </div>
+            <div><p className="mb-1 text-[14px] font-semibold">Link de convite para afiliados</p><div className="flex gap-2"><p className="num flex-1 truncate rounded-ctl bg-canvas px-3 py-2.5 text-[13px]">{invite}</p><CopyButton text={invite} size="sm" /></div></div>
+          </>}
+          <Button onClick={() => save(`/v1/products/${p.id}`, { ...v, category: v.category || null, affiliate_rules: v.affiliate_rules.trim() || null, affiliate_commission_bps: Math.round(v.affiliate_commission_bps * 100) })}>Salvar</Button>
+        </Card>
+        {v.affiliation_enabled && p.offers.length > 0 && <Card className="space-y-3"><h2 className="font-extrabold">Comissão por oferta</h2>
+          <p className="text-[14px] text-ink-mute">Em branco, vale a comissão do produto ({v.affiliate_commission_bps}%). Útil para pagar mais no plano anual ou menos numa oferta de entrada.</p>
+          {p.offers.map((o: any) => <div key={o.id} className="flex items-end gap-2"><Field className="flex-1" label={`${o.name} — ${brl(o.price_cents)}`} inputMode="decimal" placeholder={String(v.affiliate_commission_bps)} value={offerBps[o.id]} onChange={e => setOfferBps({ ...offerBps, [o.id]: e.target.value.replace(/[^\d,.]/g, '') })} right={<span className="text-ink-mute">%</span>} />
+            <Button variant="secondary" onClick={() => { const x = offerBps[o.id]; save(`/v1/offers/${o.id}`, { affiliate_commission_bps: x ? Math.round(Number(x.replace(',', '.')) * 100) : null }); }}>Salvar</Button></div>)}
+        </Card>}
+      </div>
+      <div className="space-y-4">
+        {pending.length > 0 && <Card className="border-warn-line"><h2 className="font-extrabold">Pedidos de afiliação ({pending.length})</h2><ul className="mt-1 divide-y divide-line">{pending.map((a: any) => <Row key={a.id} a={a} />)}</ul></Card>}
+        <Card><h2 className="font-extrabold">Afiliados</h2>
+          {p.affiliations.filter((a: any) => a.status !== 'pending').length === 0 ? <p className="mt-2 text-ink-mute">Ninguém se afiliou ainda.</p> : <ul className="mt-1 divide-y divide-line">{p.affiliations.filter((a: any) => a.status !== 'pending').map((a: any) => <Row key={a.id} a={a} />)}</ul>}
+        </Card>
+        {v.affiliation_enabled && <Card className="space-y-3"><h2 className="font-extrabold">Materiais para afiliados</h2>
+          <p className="text-[14px] text-ink-mute">Afiliados aprovados veem estes materiais: links para pastas de criativos e vídeos, e textos prontos (anúncios, e-mails, roteiros).</p>
+          {p.materials?.length > 0 && <ul className="divide-y divide-line">{p.materials.map((x: any) => <li key={x.id} className="flex min-h-[44px] items-center justify-between gap-2"><span className="min-w-0 truncate"><Pill>{x.kind === 'link' ? 'Link' : 'Texto'}</Pill> {x.title}</span><Button size="sm" variant="ghost" className="text-bad" onClick={async () => { await api('DELETE', `/v1/materials/${x.id}`); reload(); }}>Remover</Button></li>)}</ul>}
+          {mErr && <Banner tone="bad">{mErr}</Banner>}
+          <div className="grid grid-cols-[140px_1fr] gap-2"><Select label="Tipo" value={m.kind} onChange={e => setM({ ...m, kind: e.target.value })}><option value="link">Link</option><option value="text">Texto</option></Select><Field label="Título" value={m.title} onChange={e => setM({ ...m, title: e.target.value })} placeholder="Ex.: Criativos para Instagram" /></div>
+          {m.kind === 'link' ? <Field label="Link (https://)" value={m.url} onChange={e => setM({ ...m, url: e.target.value })} placeholder="https://drive.google.com/…" /> : <Textarea label="Texto" value={m.body} onChange={e => setM({ ...m, body: e.target.value })} />}
+          <Button variant="secondary" onClick={async () => { setMErr(null); try { await post(`/v1/products/${p.id}/materials`, { kind: m.kind, title: m.title, url: m.kind === 'link' ? m.url : undefined, body: m.kind === 'text' ? m.body : undefined }); setM({ kind: m.kind, title: '', url: '', body: '' }); reload(); } catch (e) { setMErr(Object.values((e as ApiError).fields ?? {})[0] ?? (e as ApiError).title); } }}>+ Adicionar material</Button>
+        </Card>}
+      </div>
     </div>
   );
 }

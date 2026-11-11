@@ -5,7 +5,7 @@ import { PrismaService, Tx } from '../../infra/prisma.service';
 import { redis } from '../../infra/redis';
 import * as rl from '../../infra/rate-limit';
 import { blindIndex } from '../../common/crypto';
-import { DEFAULT_RISK, RiskConfig, Signal, Decision, mergeConfig, scoreRules, gatewaySignal, total, decide, hourBRT } from '../../domain/risk';
+import { DEFAULT_RISK, RiskConfig, Signal, Decision, mergeConfig, scoreRules, gatewaySignal, total, decide, hourBRT, delistReason } from '../../domain/risk';
 
 export type CardAttempt = {
   workspaceId: string; offerId: string; amountCents: bigint;
@@ -153,6 +153,29 @@ export class RiskService {
       }
     }
     return { paused };
+  }
+
+  /** Rotina diária: produtos da vitrine com reembolso ou chargeback alto saem da vitrine (o produtor é avisado no painel). */
+  async scanMarketplace() {
+    const m = (await this.config()).marketplace;
+    const rows = await this.prisma.$queryRaw<{ id: string; name: string; workspace_id: string; sales: number; refunds: number; chargebacks: number }[]>(Prisma.sql`
+      SELECT p.id, p.name, p.workspace_id,
+        COUNT(*) FILTER (WHERE o.paid_at IS NOT NULL)::int sales,
+        COUNT(*) FILTER (WHERE o.status IN ('refunded','refund_requested'))::int refunds,
+        COUNT(*) FILTER (WHERE o.status IN ('chargeback','chargeback_lost','chargeback_won'))::int chargebacks
+      FROM products p JOIN order_items i ON i.product_id=p.id AND i.kind='main' JOIN orders o ON o.id=i.order_id
+      WHERE p.marketplace_listed AND p.marketplace_delisted_at IS NULL AND o.paid_at > now() - interval '30 days'
+      GROUP BY 1,2,3`);
+    let delisted = 0;
+    for (const r of rows) {
+      const why = delistReason(r, m);
+      if (!why) continue;
+      await this.prisma.products.update({ where: { id: r.id }, data: { marketplace_delisted_at: new Date(), marketplace_delisted_reason: why } });
+      await this.audit.log({ action: 'marketplace.delist', target: `product:${r.id}`, reason: why });
+      await this.alert({ kind: 'marketplace_delist', level: 'warn', workspaceId: r.workspace_id, message: `“${r.name}” saiu da vitrine de afiliados: ${why}.`, dedupe: `mkt_delist:${r.id}:${new Date().toISOString().slice(0, 10)}`, data: r });
+      delisted++;
+    }
+    return { delisted };
   }
 
   static defaults() { return DEFAULT_RISK; }

@@ -30,6 +30,9 @@ export const TEMPLATES: Record<string, { subject?: string; body: string }> = {
   new_login: { subject: 'Novo acesso à sua conta', body: 'Entramos na sua conta de um novo aparelho ({dispositivo}). Se não foi você, troque a senha.' },
   verify_email: { subject: 'Confirme seu e-mail — Domma Mart', body: 'Confirme seu e-mail para ativar sua conta: {link}' },
   reset_password: { subject: 'Trocar senha — Domma Mart', body: 'Para criar uma nova senha, use este link (vale 30 minutos): {link}' },
+  affiliation_requested: { subject: 'Novo pedido de afiliação em {produto}', body: '{afiliado} quer se afiliar a {produto}. Como pretende divulgar: {mensagem}. Aprove ou recuse em {link}.' },
+  affiliation_approved: { subject: 'Afiliação aprovada: {produto}', body: 'Sua afiliação a {produto} foi aprovada. Seu link e os materiais de divulgação estão em {link}.' },
+  affiliation_refused: { subject: 'Afiliação não aprovada: {produto}', body: 'O produtor de {produto} não aprovou sua afiliação desta vez. Veja outros produtos na vitrine: {link}.' },
   coproduction_invite: { subject: 'Convite de sociedade em {produto}', body: '{produtor} convidou você para ser sócio de {produto}, com {percentual} sobre o líquido. Aceite em {link}.' },
 };
 

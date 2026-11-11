@@ -67,7 +67,7 @@ export function Toggle({ checked, onChange, label, hint }: { checked: boolean; o
   return (
     <label className="flex min-h-[44px] cursor-pointer items-start gap-3 py-1">
       <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)} className={cx('relative mt-0.5 h-6 w-11 flex-none rounded-full transition-colors', checked ? 'bg-action' : 'bg-line')}>
-        <span className={cx('absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform', checked ? 'translate-x-[22px]' : 'translate-x-0.5')} />
+        <span className={cx('absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform', checked ? 'translate-x-[22px]' : 'translate-x-0.5')} />
       </button>
       <span><span className="block font-semibold">{label}</span>{hint && <span className="block text-[13.5px] text-ink-mute">{hint}</span>}</span>
     </label>

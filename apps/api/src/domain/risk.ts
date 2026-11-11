@@ -21,6 +21,8 @@ export type RiskConfig = {
   reserve: { new_account_pct: number; new_account_days: number; account_age_days: number; min_paid_orders: number };
   /** RN-55: limites de chargeback do produtor (% dos pedidos pagos em 30 dias). */
   producer: { alert_pct: number; review_pct: number; pause_pct: number; min_orders: number };
+  /** Vitrine de afiliados: produto com reembolso ou chargeback alto (30 dias) sai da vitrine. */
+  marketplace: { refund_pct: number; chargeback_pct: number; min_orders: number };
 };
 
 /** Nome e explicação de cada regra, para o back-office. */
@@ -57,6 +59,7 @@ export const DEFAULT_RISK: RiskConfig = {
   },
   reserve: { new_account_pct: 0, new_account_days: 30, account_age_days: 30, min_paid_orders: 20 },
   producer: { alert_pct: 1, review_pct: 1.5, pause_pct: 2, min_orders: 20 },
+  marketplace: { refund_pct: 15, chargeback_pct: 1.5, min_orders: 20 },
 };
 
 /** Junta a configuração salva com os padrões (chaves novas ganham o valor padrão). */
@@ -64,7 +67,7 @@ export function mergeConfig(saved: Partial<RiskConfig> | null | undefined): Risk
   const s = saved ?? {};
   const rules = { ...DEFAULT_RISK.rules } as Record<RuleKey, RuleCfg>;
   for (const k of RULE_KEYS) rules[k] = { ...DEFAULT_RISK.rules[k], ...((s.rules as any)?.[k] ?? {}) };
-  return { bands: { ...DEFAULT_RISK.bands, ...(s.bands ?? {}) }, rules, reserve: { ...DEFAULT_RISK.reserve, ...(s.reserve ?? {}) }, producer: { ...DEFAULT_RISK.producer, ...(s.producer ?? {}) } };
+  return { bands: { ...DEFAULT_RISK.bands, ...(s.bands ?? {}) }, rules, reserve: { ...DEFAULT_RISK.reserve, ...(s.reserve ?? {}) }, producer: { ...DEFAULT_RISK.producer, ...(s.producer ?? {}) }, marketplace: { ...DEFAULT_RISK.marketplace, ...(s.marketplace ?? {}) } };
 }
 
 /** Faixas precisam ser crescentes (3DS < revisão < recusa). */
@@ -144,4 +147,13 @@ export function applyReserve(parts: { amount: bigint; availableAt: Date }[], pct
     if (r > 0n) out.push({ amount: r, availableAt: p.availableAt > until ? p.availableAt : until });
   }
   return out;
+}
+
+/** Produto deve sair da vitrine? (só com volume mínimo de vendas no período) */
+export function delistReason(r: { sales: number; refunds: number; chargebacks: number }, m: RiskConfig['marketplace']): string | null {
+  if (r.sales < m.min_orders) return null;
+  const refund = (r.refunds / r.sales) * 100, cb = (r.chargebacks / r.sales) * 100;
+  if (cb >= m.chargeback_pct) return `chargeback de ${cb.toFixed(1)}% nos últimos 30 dias (limite ${m.chargeback_pct}%)`;
+  if (refund >= m.refund_pct) return `reembolso de ${refund.toFixed(1)}% nos últimos 30 dias (limite ${m.refund_pct}%)`;
+  return null;
 }
