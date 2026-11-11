@@ -4,8 +4,8 @@ Plataforma de checkout, pagamentos com divisão automática, área de membros e 
 digitais — implementação do **Descritivo Técnico v2.0** (MVP / Fase 1).
 
 ```
-apps/api   NestJS + Prisma + PostgreSQL 16 + Redis/BullMQ   (porta 4000)
-apps/web   Next.js 15 + Tailwind (checkout, painel, membros, back-office)   (porta 3000)
+apps/api   NestJS 12 + Prisma + PostgreSQL 16 + Redis/BullMQ   (porta 4000)
+apps/web   Next.js 16 + Tailwind (checkout, painel, membros, back-office)   (porta 3000)
 ```
 
 O front faz proxy de `/v1/*`, `/r/*` e `/webhooks/*` para a API (mesma origem → cookies HttpOnly + SameSite).
