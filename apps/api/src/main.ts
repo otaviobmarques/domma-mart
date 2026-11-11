@@ -32,7 +32,7 @@ async function bootstrap() {
     next();
   });
   const port = Number(process.env.PORT || process.env.API_PORT || 4000);
-  await app.listen(port, '0.0.0.0');
+  await app.listen(port, process.env.LISTEN_HOST || '::');
   console.log(`Domma Mart API em http://localhost:${port}`);
 }
 bootstrap();
