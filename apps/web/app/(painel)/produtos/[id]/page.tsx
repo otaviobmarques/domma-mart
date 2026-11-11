@@ -6,7 +6,7 @@ import { netCents } from '@/lib/fees';
 import { uploadFile } from '@/lib/upload';
 import { Button, Card, Field, Select, Textarea, Toggle, Banner, Pill, CopyButton, Skeleton, Modal, cx } from '@/components/ui';
 
-const TABS = [['conteudo', 'Conteúdo'], ['preco', 'Preço e parcelas'], ['garantia', 'Garantia e limites'], ['especial', 'Oferta especial'], ['cupons', 'Cupons'], ['visual', 'Visual do checkout'], ['pixels', 'Pixels'], ['obrigado', 'Página de obrigado'], ['afiliados', 'Afiliados'], ['socios', 'Sócios']] as const;
+const TABS = [['conteudo', 'Conteúdo'], ['preco', 'Preço e parcelas'], ['garantia', 'Garantia e limites'], ['especial', 'Oferta especial'], ['upsell', 'Upsell'], ['cupons', 'Cupons'], ['visual', 'Visual do checkout'], ['pixels', 'Pixels'], ['obrigado', 'Página de obrigado'], ['afiliados', 'Afiliados'], ['socios', 'Sócios']] as const;
 
 export default function Produto({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -44,6 +44,7 @@ export default function Produto({ params }: { params: Promise<{ id: string }> })
         {tab === 'preco' && <Preco offer={offer} save={save} />}
         {tab === 'garantia' && <Garantia p={p} offer={offer} save={save} />}
         {tab === 'especial' && <Especial p={p} offer={offer} save={save} />}
+        {tab === 'upsell' && <Upsell p={p} offer={offer} save={save} />}
         {tab === 'cupons' && <Cupons p={p} offer={offer} reload={load} setMsg={setMsg} />}
         {tab === 'visual' && <Visual p={p} offer={offer} save={save} reload={load} />}
         {tab === 'pixels' && <Pixels offer={offer} save={save} />}
@@ -168,6 +169,58 @@ function Especial({ p, offer, save }: any) {
       ))}
       {items.length < 3 && p.bump_candidates.length > 0 && <Button variant="secondary" onClick={() => setItems([...items, { offer_id: p.bump_candidates[0].offer_id, headline: '' }])}>+ Adicionar oferta especial</Button>}
       <div><Button onClick={() => save(`/v1/offers/${offer.id}/bumps`, { items }, 'PUT')}>Salvar</Button></div>
+    </Card>
+  );
+}
+
+function Upsell({ p, offer, save }: any) {
+  const cands = (p.funnel_candidates ?? []).filter((c: any) => c.offer_id !== offer.id);
+  const [f, setF] = useState({
+    upsell_offer_id: offer.upsell_offer_id ?? '', upsell_headline: offer.upsell_headline ?? '', upsell_text: offer.upsell_text ?? '',
+    downsell_offer_id: offer.downsell_offer_id ?? '', downsell_headline: offer.downsell_headline ?? '', downsell_text: offer.downsell_text ?? '',
+  });
+  const label = (c: any) => `${c.name}${c.offer_name && c.offer_name !== 'Padrão' ? ` (${c.offer_name})` : ''} — ${brl(c.price_cents)}`;
+  const up = cands.find((c: any) => c.offer_id === f.upsell_offer_id);
+  const down = cands.find((c: any) => c.offer_id === f.downsell_offer_id);
+  const nul = (v: string) => v.trim() || null;
+  return (
+    <Card className="max-w-xl space-y-5">
+      <div>
+        <p className="text-ink-soft">Depois que o pagamento é aprovado, a página de obrigado mostra mais uma oferta. O cliente compra com <b>1 clique</b>: no cartão, cobramos o mesmo cartão da compra; no Pix, geramos um Pix novo.</p>
+        <p className="mt-2 text-[13.5px] text-ink-mute">A oferta fica disponível por 30 minutos depois do pagamento. Cada compra adicional é um pedido separado, com garantia e reembolso próprios.</p>
+      </div>
+      {offer.billing_type === 'subscription' && <Banner tone="info">Esta é uma assinatura: o upsell aparece depois do pagamento da primeira cobrança.</Banner>}
+      {cands.length === 0 && <Banner tone="info">Crie outro produto (ou outra oferta) de pagamento único para oferecer aqui.</Banner>}
+      {cands.length > 0 && <>
+        <fieldset className="space-y-3">
+          <legend className="mb-1 font-semibold">Upsell</legend>
+          <Select label="Oferta mostrada depois da compra" value={f.upsell_offer_id} onChange={e => setF({ ...f, upsell_offer_id: e.target.value, ...(e.target.value ? {} : { downsell_offer_id: '' }) })}>
+            <option value="">Nenhuma (sem upsell)</option>
+            {cands.map((c: any) => <option key={c.offer_id} value={c.offer_id}>{label(c)}</option>)}
+          </Select>
+          {f.upsell_offer_id && <>
+            <Field label="Título" value={f.upsell_headline} onChange={e => setF({ ...f, upsell_headline: e.target.value })} maxLength={120} hint={`Em branco: “Leve também ${up?.name ?? 'o produto'}”.`} />
+            <Textarea label="Texto (opcional)" value={f.upsell_text} onChange={e => setF({ ...f, upsell_text: e.target.value })} maxLength={600} hint="Em branco, usamos a descrição do produto." />
+          </>}
+        </fieldset>
+        {f.upsell_offer_id && <fieldset className="space-y-3 border-t border-line pt-4">
+          <legend className="mb-1 font-semibold">Downsell (opcional)</legend>
+          <p className="text-[14px] text-ink-mute">Aparece só se o cliente disser “Não, obrigado” ao upsell (ou se o cartão não passar). Normalmente é uma versão mais barata.</p>
+          <Select label="Oferta se o cliente recusar" value={f.downsell_offer_id} onChange={e => setF({ ...f, downsell_offer_id: e.target.value })}>
+            <option value="">Nenhuma</option>
+            {cands.filter((c: any) => c.offer_id !== f.upsell_offer_id).map((c: any) => <option key={c.offer_id} value={c.offer_id}>{label(c)}</option>)}
+          </Select>
+          {f.downsell_offer_id && <>
+            <Field label="Título" value={f.downsell_headline} onChange={e => setF({ ...f, downsell_headline: e.target.value })} maxLength={120} hint={`Em branco: “Leve também ${down?.name ?? 'o produto'}”.`} />
+            <Textarea label="Texto (opcional)" value={f.downsell_text} onChange={e => setF({ ...f, downsell_text: e.target.value })} maxLength={600} />
+          </>}
+          {up && down && BigInt(down.price_cents) >= BigInt(up.price_cents) && <Banner tone="warn">O downsell costuma ser mais barato que o upsell.</Banner>}
+        </fieldset>}
+        <div><Button onClick={() => save(`/v1/offers/${offer.id}/funnel`, {
+          upsell_offer_id: f.upsell_offer_id || null, upsell_headline: nul(f.upsell_headline), upsell_text: nul(f.upsell_text),
+          downsell_offer_id: f.downsell_offer_id || null, downsell_headline: nul(f.downsell_headline), downsell_text: nul(f.downsell_text),
+        }, 'PUT')}>Salvar</Button></div>
+      </>}
     </Card>
   );
 }

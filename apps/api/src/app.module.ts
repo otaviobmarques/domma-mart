@@ -17,6 +17,7 @@ import { SandboxGateway } from './modules/gateway/sandbox.adapter';
 import { LedgerService } from './modules/ledger/ledger.service';
 import { OrdersService } from './modules/orders/orders.service';
 import { CheckoutService } from './modules/checkout/checkout.service';
+import { FunnelService } from './modules/checkout/funnel.service';
 import { CheckoutController } from './modules/checkout/checkout.controller';
 import { WebhooksController, SandboxController } from './modules/webhooks/webhooks.controller';
 import { JobsService } from './modules/jobs/jobs.service';
@@ -52,7 +53,7 @@ function gatewayFactory() {
     AdminController, DevController, AdminOutboxController, DomainsController, AdjustmentsController, GoogleAuthController, PrivacyController,
   ],
   providers: [
-    PrismaService, AuditService, StorageService, QueueService, NotifyService, LedgerService, OrdersService, CheckoutService, JobsService, FinanceService, PrivacyService,
+    PrismaService, AuditService, StorageService, QueueService, NotifyService, LedgerService, OrdersService, CheckoutService, FunnelService, JobsService, FinanceService, PrivacyService,
     { provide: GATEWAY, useFactory: gatewayFactory },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_FILTER, useClass: ProblemFilter },

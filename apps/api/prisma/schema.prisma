@@ -263,6 +263,13 @@ model offers {
   pix_expiration_min   Int              @default(30)
   boleto_due_days      Int              @default(3)
   thank_you_url        String?
+  /// Funil pós-compra (Fase 2): oferta mostrada na página de obrigado; downsell se o comprador recusar
+  upsell_offer_id      String?          @db.Uuid
+  upsell_headline      String?
+  upsell_text          String?
+  downsell_offer_id    String?          @db.Uuid
+  downsell_headline    String?
+  downsell_text        String?
   theme                Json?
   status               OfferStatus      @default(draft)
   created_at           DateTime         @default(now()) @db.Timestamptz
@@ -526,6 +533,9 @@ model orders {
   coupon_id         String?       @db.Uuid
   affiliate_workspace_id String?  @db.Uuid
   subscription_id   String?       @db.Uuid
+  /// pedido de upsell/downsell: aponta para a compra que abriu o funil
+  parent_order_id   String?       @db.Uuid
+  funnel_step       String? // upsell | downsell
   tracking          Json?
   ip_hash           String
   user_agent        String
@@ -545,6 +555,7 @@ model orders {
 
   @@index([workspace_id, created_at])
   @@index([customer_id])
+  @@unique([parent_order_id, funnel_step])
 }
 
 model order_items {
