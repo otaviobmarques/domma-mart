@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react';
 import { get, post, api, ApiError } from '@/lib/api';
 import { ago, dateTime, maskPhone } from '@/lib/format';
 import { useMe } from '@/components/session';
+import { PrivacyCard } from '@/components/privacy-card';
 import { Button, Card, Field, Textarea, Toggle, Banner, Pill, Modal, CopyButton, cx } from '@/components/ui';
 
-const TABS = [['seguranca', 'Perfil e segurança'], ['equipe', 'Equipe'], ['empresa', 'Dados da empresa'], ['notificacoes', 'Notificações'], ['recuperacao', 'Recuperação de vendas'], ['integracoes', 'Integrações'], ['dominio', 'Domínio próprio']] as const;
+const TABS = [['seguranca', 'Perfil e segurança'], ['equipe', 'Equipe'], ['empresa', 'Dados da empresa'], ['notificacoes', 'Notificações'], ['recuperacao', 'Recuperação de vendas'], ['integracoes', 'Integrações'], ['dominio', 'Domínio próprio'], ['privacidade', 'Privacidade e dados']] as const;
 const PERM: Record<string, string> = { 'dashboard.view': 'Ver início', 'products.edit': 'Editar produtos', 'orders.view': 'Ver vendas', 'orders.refund': 'Reembolsar', 'finance.view': 'Ver financeiro', 'finance.withdraw': 'Sacar', 'affiliates.manage': 'Gerir afiliados', 'settings.manage': 'Configurações', 'team.manage': 'Gerir equipe' };
 
 export default function Config() {
@@ -25,6 +26,7 @@ export default function Config() {
         {tab === 'recuperacao' && <Recuperacao setMsg={setMsg} />}
         {tab === 'integracoes' && <Integracoes setMsg={setMsg} />}
         {tab === 'dominio' && <Dominio setMsg={setMsg} />}
+        {tab === 'privacidade' && <div className="max-w-2xl"><PrivacyCard base="/v1/privacy" audience="seller" /></div>}
       </div>
     </div>
   );

@@ -39,7 +39,7 @@ export function clientIp(req: Request): string {
 /** Permissões internas Domma por papel (seção 2). */
 export const PLATFORM_PERMS: Record<string, string[]> = {
   support: ['admin.view', 'orders.lookup'],
-  compliance: ['admin.view', 'orders.lookup', 'kyc.view', 'kyc.decide', 'moderation.decide', 'disputes.manage', 'risk.manage'],
+  compliance: ['admin.view', 'orders.lookup', 'kyc.view', 'kyc.decide', 'moderation.decide', 'disputes.manage', 'risk.manage', 'privacy.manage'],
   finance: ['admin.view', 'orders.lookup', 'reconciliation.view', 'ledger.adjust', 'fees.manage'],
-  super_admin: ['admin.view', 'orders.lookup', 'kyc.view', 'kyc.decide', 'moderation.decide', 'disputes.manage', 'risk.manage', 'reconciliation.view', 'ledger.adjust', 'fees.manage', 'audit.view'],
+  super_admin: ['admin.view', 'orders.lookup', 'kyc.view', 'kyc.decide', 'moderation.decide', 'disputes.manage', 'risk.manage', 'reconciliation.view', 'ledger.adjust', 'fees.manage', 'audit.view', 'privacy.manage'],
 };

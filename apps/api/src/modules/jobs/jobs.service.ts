@@ -6,6 +6,7 @@ import { QueueService } from '../../infra/queue.service';
 import { NotifyService, render } from '../../infra/notify.service';
 import { OrdersService } from '../orders/orders.service';
 import { GATEWAY, GatewayAdapter, GatewayEvent } from '../gateway/gateway.types';
+import { PrivacyService } from '../privacy/privacy.service';
 import { decrypt, blindIndex, hmacSign, randomToken, signToken } from '../../common/crypto';
 import { formatBRL, tierBpsFor } from '../../domain/money';
 import { maskEmail } from '../../domain/validators';
@@ -26,6 +27,7 @@ export class JobsService implements OnApplicationBootstrap {
   constructor(
     private prisma: PrismaService, private queue: QueueService, private notify: NotifyService,
     private orders: OrdersService, private finance: FinanceService, @Inject(GATEWAY) private gateway: GatewayAdapter,
+    private privacy: PrivacyService,
   ) {}
 
   async onApplicationBootstrap() {
@@ -40,11 +42,13 @@ export class JobsService implements OnApplicationBootstrap {
     q.register('fees.tiers', () => this.recomputeTiers());
     q.register('reconcile.daily', () => this.reconcile());
     q.register('transfers.poll', () => this.pollTransfers());
+    q.register('privacy.due', async () => { await this.privacy.runDue(); });
     q.startWorker();
     if (process.env.DISABLE_CRON !== '1') {
       await q.repeat('subscriptions.charge', '15 * * * *');
       await q.repeat('fees.tiers', '0 3 * * *'); // RN-05: diariamente às 03:00
       await q.repeat('reconcile.daily', '30 4 * * *');
+      await q.repeat('privacy.due', '15 5 * * *'); // LGPD: anonimiza quem pediu exclusão quando vence o prazo legal
       if (this.gateway.getTransfer) await q.repeat('transfers.poll', '*/10 * * * *'); // gateways sem webhook de transferência
     }
   }

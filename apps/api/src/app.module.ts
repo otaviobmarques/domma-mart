@@ -10,6 +10,8 @@ import { NotifyService } from './infra/notify.service';
 import { AuthGuard } from './http/auth.guard';
 import { ProblemFilter } from './http/problem.filter';
 import { GATEWAY } from './modules/gateway/gateway.types';
+import { PrivacyController } from './modules/privacy/privacy.controller';
+import { PrivacyService } from './modules/privacy/privacy.service';
 import { PagarmeGateway } from './modules/gateway/pagarme.adapter';
 import { SandboxGateway } from './modules/gateway/sandbox.adapter';
 import { LedgerService } from './modules/ledger/ledger.service';
@@ -47,10 +49,10 @@ function gatewayFactory() {
   controllers: [
     HealthController, CheckoutController, WebhooksController, SandboxController, AuthController, CustomerController, OptOutController,
     ProductsController, MembersController, FilesController, DashboardController, KycController, AffiliatesController, SettingsController,
-    AdminController, DevController, DomainsController, AdjustmentsController, GoogleAuthController,
+    AdminController, DevController, DomainsController, AdjustmentsController, GoogleAuthController, PrivacyController,
   ],
   providers: [
-    PrismaService, AuditService, StorageService, QueueService, NotifyService, LedgerService, OrdersService, CheckoutService, JobsService, FinanceService,
+    PrismaService, AuditService, StorageService, QueueService, NotifyService, LedgerService, OrdersService, CheckoutService, JobsService, FinanceService, PrivacyService,
     { provide: GATEWAY, useFactory: gatewayFactory },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_FILTER, useClass: ProblemFilter },

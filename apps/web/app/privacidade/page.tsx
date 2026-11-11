@@ -49,9 +49,9 @@ const S: Section[] = [
   { id: 'direitos', title: 'Seus direitos', body: <>
     <p>Pela LGPD (art. 18) você pode pedir: confirmação de que tratamos seus dados, acesso, correção, anonimização ou eliminação de dados desnecessários, portabilidade, informação sobre com quem compartilhamos, revisão de decisões automatizadas e retirada do consentimento.</p>
     <ul>
-      <li>Compradores podem ver as compras, remover cartões guardados e deixar de receber mensagens em “Minhas compras” e no link de descadastro de cada mensagem.</li>
-      <li>Vendedores podem corrigir os dados no painel.</li>
-      <li>Para os demais pedidos, escreva para <V v={LEGAL.dpoEmail} label="E-mail do encarregado" />. Respondemos em até 15 dias. Dados que a lei manda guardar só são apagados ao fim do prazo legal.</li>
+      <li><b>Compradores:</b> em “Minhas compras” › “Seus dados” você baixa uma cópia dos seus dados, pede correção ou pede a exclusão; também remove cartões guardados e pode deixar de receber mensagens pelo link de cada uma.</li>
+      <li><b>Produtores e afiliados:</b> em “Configurações” › “Privacidade e dados” você baixa os seus dados e pede correção ou o encerramento da conta.</li>
+      <li>Também atendemos pelo e-mail <V v={LEGAL.dpoEmail} label="E-mail do encarregado" />. Respondemos em até 15 dias. Dados que a lei manda guardar só são apagados ao fim do prazo legal; depois disso, a anonimização é automática.</li>
       <li>Se você é comprador, também pode falar com o produtor, que é o controlador dos seus dados; repassamos a ele os pedidos que recebermos.</li>
     </ul>
   </> },
