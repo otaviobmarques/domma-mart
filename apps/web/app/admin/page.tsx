@@ -1,14 +1,14 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { get, post, api, ApiError } from '@/lib/api';
-import { brl, dateTime, shortDate, ago } from '@/lib/format';
+import { brl, dateTime, shortDate, ago, maskMoney, moneyToCents } from '@/lib/format';
 import { Button, Card, Field, Textarea, Select, Skeleton, Banner, Pill, StatusBadge, Modal, cx } from '@/components/ui';
 
 export default function Admin() {
   const [v, setV] = useState<string | null>(null);
   useEffect(() => setV(new URLSearchParams(location.search).get('v') ?? ''), []);
   if (v === null) return null;
-  return ({ kyc: <Kyc />, moderacao: <Moderacao />, disputas: <Disputas />, risco: <Risco />, contas: <Contas />, pedidos: <Pedidos />, conciliacao: <Conciliacao />, auditoria: <Auditoria /> } as Record<string, React.ReactNode>)[v] ?? <Overview />;
+  return ({ kyc: <Kyc />, moderacao: <Moderacao />, disputas: <Disputas />, risco: <Risco />, contas: <Contas />, pedidos: <Pedidos />, conciliacao: <Conciliacao />, ajustes: <Ajustes />, auditoria: <Auditoria /> } as Record<string, React.ReactNode>)[v] ?? <Overview />;
 }
 
 function H({ children }: { children: React.ReactNode }) { return <h1 className="mb-4 text-[24px] font-extrabold">{children}</h1>; }
@@ -155,4 +155,49 @@ function Auditoria() {
     <Banner tone={d.chain.ok ? 'ok' : 'bad'} className="mb-4">{d.chain.ok ? `Cadeia íntegra: ${d.chain.count} registros com hash encadeado.` : 'Cadeia de auditoria quebrada! Investigar imediatamente.'}</Banner>
     <Field label="Filtrar por alvo" value={t} onChange={e => setT(e.target.value)} placeholder="workspace:…, order:…" className="mb-3 max-w-md" />
     <Card className="p-0">{d.rows.length === 0 && <p className="p-5 text-ink-mute">Nenhum registro ainda.</p>}<ul className="divide-y divide-line text-[13.5px]">{d.rows.map((r: any) => <li key={r.id} className="px-5 py-2.5"><div className="flex flex-wrap justify-between gap-2"><span><b>{r.action}</b> · <span className="num">{r.target}</span> · {r.actor}</span><span className="text-ink-mute">{dateTime(r.created_at)}</span></div>{r.reason && <p className="text-ink-soft">Motivo: {r.reason}</p>}<p className="num truncate text-[11px] text-ink-mute">{r.hash}</p></li>)}</ul></Card></>);
+}
+
+function Ajustes() {
+  const [status, setStatus] = useState('pending');
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [f, setF] = useState({ workspace_id: '', sign: '1', amount: '', reason: '' });
+  const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
+  const [rej, setRej] = useState<any>(null);
+  const [note, setNote] = useState('');
+  const load = () => get(`/v1/admin/adjustments?status=${status}`).then(setRows).catch((e: ApiError) => setMsg({ tone: 'bad', text: e.code === 'PERMISSION_DENIED' ? 'Só o Financeiro Domma acessa os ajustes de saldo.' : e.title }));
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [status]);
+  useEffect(() => { get('/v1/admin/accounts').then(setAccounts).catch(() => {}); }, []);
+  const err = (e: unknown) => { const x = e as ApiError; setMsg({ tone: 'bad', text: Object.values(x.fields ?? {})[0] ?? x.title }); };
+  return (<><H>Ajustes de saldo</H>
+    <p className="-mt-2 mb-4 max-w-2xl text-[14.5px] text-ink-soft">O saldo nunca é editado: cada ajuste vira um lançamento no livro-razão, com motivo. Uma pessoa do Financeiro pede e <b>outra</b> aprova (RN-38). Tudo fica na auditoria.</p>
+    {msg && <Banner tone={msg.tone} className="mb-4">{msg.text}</Banner>}
+    <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
+      <Card className="h-fit space-y-3">
+        <h2 className="font-extrabold">Pedir ajuste</h2>
+        <Select label="Conta" value={f.workspace_id} onChange={e => setF({ ...f, workspace_id: e.target.value })}><option value="">Escolha…</option>{accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</Select>
+        <div className="grid grid-cols-[1fr_1.2fr] gap-2">
+          <Select label="Tipo" value={f.sign} onChange={e => setF({ ...f, sign: e.target.value })}><option value="1">Crédito</option><option value="-1">Débito</option></Select>
+          <Field label="Valor (R$)" inputMode="numeric" value={f.amount} onChange={e => setF({ ...f, amount: maskMoney(e.target.value) })} mono />
+        </div>
+        <Textarea label="Motivo (mín. 15 caracteres)" value={f.reason} onChange={e => setF({ ...f, reason: e.target.value })} />
+        <Button full onClick={async () => { setMsg(null); try { await post('/v1/admin/adjustments', { workspace_id: f.workspace_id, amount_cents: Number(f.sign) * moneyToCents(f.amount), reason: f.reason }); setF({ workspace_id: '', sign: '1', amount: '', reason: '' }); setMsg({ tone: 'ok', text: 'Pedido criado. Agora outra pessoa do Financeiro precisa aprovar.' }); setStatus('pending'); load(); } catch (e) { err(e); } }}>Pedir ajuste</Button>
+      </Card>
+      <Card className="p-0">
+        <div className="flex items-center justify-between px-5 py-3"><span className="font-extrabold">Pedidos</span><Select label="" aria-label="Filtrar" value={status} onChange={e => setStatus(e.target.value)} className="w-44"><option value="pending">Pendentes</option><option value="approved">Aprovados</option><option value="rejected">Recusados</option><option value="all">Todos</option></Select></div>
+        {!rows ? <Skeleton className="m-5 h-24" /> : rows.length === 0 ? <p className="px-5 pb-5 text-ink-mute">Nada por aqui.</p> : <ul className="divide-y divide-line">{rows.map(r => (
+          <li key={r.id} className="px-5 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span><b>{r.account}</b> · <span className={cx('num font-bold', r.amount_cents > 0 ? 'text-ok' : 'text-bad')}>{r.amount_cents > 0 ? '+' : '−'}{brl(Math.abs(r.amount_cents))}</span> <Pill tone={r.status === 'approved' ? 'ok' : r.status === 'pending' ? 'warn' : 'neutral'}>{({ pending: 'Pendente', approved: 'Aprovado', rejected: 'Recusado', cancelled: 'Cancelado' } as any)[r.status]}</Pill></span>
+              {r.status === 'pending' && <span className="flex gap-2"><Button size="sm" variant="ok" onClick={async () => { try { await post(`/v1/admin/adjustments/${r.id}/approve`, {}); setMsg({ tone: 'ok', text: 'Ajuste aprovado e lançado no livro-razão.' }); load(); } catch (e) { err(e); } }}>Aprovar</Button><Button size="sm" variant="secondary" onClick={() => { setRej(r); setNote(''); }}>Recusar</Button><Button size="sm" variant="ghost" onClick={async () => { try { await post(`/v1/admin/adjustments/${r.id}/cancel`); load(); } catch (e) { err(e); } }}>Cancelar</Button></span>}
+            </div>
+            <p className="mt-1 text-[14px] text-ink-soft">{r.reason}</p>
+            <p className="mt-0.5 text-[12.5px] text-ink-mute">Pedido por {r.requested_by_name} em {dateTime(r.created_at)}{r.decided_by_name ? ` · decidido por ${r.decided_by_name} em ${dateTime(r.decided_at)}` : ''}{r.decision_note ? ` — ${r.decision_note}` : ''}</p>
+          </li>))}</ul>}
+      </Card>
+    </div>
+    <Modal open={!!rej} onClose={() => setRej(null)} title="Recusar ajuste" footer={<Button variant="danger" onClick={async () => { try { await post(`/v1/admin/adjustments/${rej.id}/reject`, { note }); setRej(null); load(); } catch (e) { err(e); setRej(null); } }}>Recusar</Button>}>
+      <Textarea label="Motivo" value={note} onChange={e => setNote(e.target.value)} />
+    </Modal>
+  </>);
 }

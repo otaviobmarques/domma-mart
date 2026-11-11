@@ -45,6 +45,9 @@ async function main() {
   const admin = await user('admin@dommamart.com', 'Admin Domma', 'super_admin', true);
   await workspace(admin.u.id, 'Domma (interno)', '39053344705', false);
 
+  const fin = await user('financeiro@dommamart.com', 'Financeiro Domma', 'finance', true);
+  await workspace(fin.u.id, 'Domma Financeiro (interno)', '86288366757', false);
+
   const prod = await user('produtora@demo.com', 'Ana Confeiteira', 'none', true);
   const ws = await workspace(prod.u.id, 'Ana Confeiteira', '52998224725', true);
   await prisma.payout_accounts.upsert({ where: { workspace_id: ws.id }, create: { workspace_id: ws.id, pix_key_enc: encrypt('produtora@demo.com'), pix_key_mask: 'pr***@demo.com', holder_name: 'Ana Confeiteira', holder_doc_hash: ws.document_hash!, active_from: new Date(Date.now() - 86400000) }, update: {} });
@@ -77,6 +80,7 @@ async function main() {
 
   console.log('\n✔ Seed concluído. Senha de todos: ' + PASSWORD);
   console.log('  admin@dommamart.com  (back-office)' + (admin.secret ? `  TOTP: ${admin.secret}` : ''));
+  console.log('  financeiro@dommamart.com (financeiro)' + (fin.secret ? `  TOTP: ${fin.secret}` : ''));
   console.log('  produtora@demo.com   (produtora)  ' + (prod.secret ? `  TOTP: ${prod.secret}` : ''));
   console.log('  afiliado@demo.com    (afiliado, link /r/bruno/confeitaria)');
   console.log('  Checkout: /pay/confeitaria   ·   Cupom: BEMVINDO\n');

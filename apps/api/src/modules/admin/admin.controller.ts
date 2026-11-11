@@ -31,8 +31,9 @@ export class AdminController {
     ]);
     const [rev] = await this.prisma.$queryRaw<{ s: bigint }[]>`SELECT COALESCE(SUM(credit_cents-debit_cents),0)::bigint s FROM ledger_entries WHERE owner_type='platform'`;
     const [gmv] = await this.prisma.$queryRaw<{ s: bigint; n: bigint }[]>`SELECT COALESCE(SUM(total_cents),0)::bigint s, COUNT(*)::bigint n FROM orders WHERE paid_at IS NOT NULL AND paid_at > now() - interval '30 days'`;
+    const adjustments = await this.prisma.ledger_adjustments.count({ where: { status: 'pending' } });
     const failedHooks = await this.prisma.webhook_events_in.count({ where: { processed_at: null, created_at: { lt: new Date(Date.now() - 5 * 60_000) } } });
-    return toJSON({ pending: { kyc, moderation, disputes, failed_webhooks: failedHooks }, accounts, platform_revenue_cents: rev.s, gmv_30d_cents: gmv.s, orders_30d: gmv.n });
+    return toJSON({ pending: { kyc, moderation, disputes, failed_webhooks: failedHooks, adjustments }, accounts, platform_revenue_cents: rev.s, gmv_30d_cents: gmv.s, orders_30d: gmv.n });
   }
 
   // ───── Fila de KYC (19.11) ─────
