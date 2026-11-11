@@ -14,6 +14,7 @@ export const TEMPLATES: Record<string, { subject?: string; body: string }> = {
   boleto_generated: { subject: '{produtor}: seu boleto', body: 'Seu boleto de {valor} vence em {data}. Código: {linha_digitavel}. PDF: {link}' },
   magic_link: { subject: 'Seu link de acesso — Domma Mart', body: 'Clique para entrar na sua área de cliente: {link}. O link vale por 15 minutos e só pode ser usado uma vez.' },
   otp_code: { body: 'Seu código de acesso Domma Mart é {codigo}. Ele vale por 10 minutos.' },
+  privacy_request_update: { subject: 'Seu pedido sobre dados pessoais', body: 'Seu pedido sobre dados pessoais na Domma Mart {situacao}. {resposta}' },
   one_click_code: { subject: 'Seu código para comprar com 1 clique', body: 'Seu código para pagar com o cartão guardado é {codigo}. Ele vale por 10 minutos. Se não foi você, ignore este e-mail.' },
   refund_confirmed: { subject: '{produtor}: reembolso confirmado', body: 'Seu reembolso de {valor} da compra {produto} foi confirmado. {prazo_por_meio}.' },
   subscription_renewed: { subject: '{produtor}: assinatura renovada', body: 'Renovamos sua assinatura de {produto}: {valor}, cartão final {final}. Próxima cobrança em {data}.' },

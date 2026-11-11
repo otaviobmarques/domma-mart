@@ -22,10 +22,16 @@ const SESSION_MS = 30 * 86400000; // RN-82
 export class CustomerController {
   constructor(private prisma: PrismaService, private notify: NotifyService, private orders: OrdersService, @Inject(GATEWAY) private gateway: GatewayAdapter) {}
 
+  /**
+   * A sessão do comprador só nasce no endereço principal: no domínio próprio de um produtor o cookie ficaria
+   * num domínio que ele controla (poderia apontar o DNS para outro servidor e capturar a sessão).
+   */
+  private mainDomainOnly(req: R) {
+    if (trustedHostHeader(req as any)) throw new AppError('PERMISSION_DENIED', { title: 'Para entrar, use o endereço principal da Domma Mart.' });
+  }
+
   private async session(res: Response, customerId: string, req?: R) {
-    // a sessão do comprador só nasce no endereço principal: no domínio próprio de um produtor o cookie ficaria
-    // num domínio que ele controla (poderia apontar o DNS para outro servidor e capturar a sessão)
-    if (req && trustedHostHeader(req as any)) throw new AppError('PERMISSION_DENIED', { title: 'Para entrar, use o endereço principal da Domma Mart.' });
+    if (req) this.mainDomainOnly(req);
     const t = randomToken(32);
     await this.prisma.customer_sessions.create({ data: { customer_id: customerId, token_hash: sha256(t), expires_at: new Date(Date.now() + SESSION_MS) } });
     res.cookie('dm_customer', t, cookieOpts(SESSION_MS));
@@ -68,6 +74,7 @@ export class CustomerController {
 
   @Post('auth/verify') @Public() @HttpCode(200)
   async verify(@Body() b: any, @Req() req: R, @Res({ passthrough: true }) res: Response) {
+    this.mainDomainOnly(req); // antes de gastar o link ou o código
     const d = parse(z.union([z.object({ token: z.string().max(100) }), z.object({ phone: z.string().max(30), code: z.string().length(6) })]), b);
     let row;
     if ('token' in d) {
@@ -93,6 +100,7 @@ export class CustomerController {
   /** "Acessar meu curso" na página de obrigado (19.3). */
   @Post('auth/order-login') @Public() @HttpCode(200)
   async orderLogin(@Body() b: any, @Req() req: R, @Res({ passthrough: true }) res: Response) {
+    this.mainDomainOnly(req);
     const { token } = parse(z.object({ token: z.string().max(100) }), b);
     const row = await this.prisma.customer_auth_tokens.findUnique({ where: { token_hash: sha256(token) } });
     if (!row || row.kind !== 'order' || row.used_at || row.expires_at < new Date()) throw new AppError('AUTH_LINK_EXPIRED');

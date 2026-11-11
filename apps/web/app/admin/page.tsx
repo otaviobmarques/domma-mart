@@ -8,7 +8,7 @@ export default function Admin() {
   const [v, setV] = useState<string | null>(null);
   useEffect(() => setV(new URLSearchParams(location.search).get('v') ?? ''), []);
   if (v === null) return null;
-  return ({ kyc: <Kyc />, moderacao: <Moderacao />, disputas: <Disputas />, risco: <Risco />, contas: <Contas />, pedidos: <Pedidos />, conciliacao: <Conciliacao />, ajustes: <Ajustes />, auditoria: <Auditoria /> } as Record<string, React.ReactNode>)[v] ?? <Overview />;
+  return ({ kyc: <Kyc />, moderacao: <Moderacao />, disputas: <Disputas />, risco: <Risco />, contas: <Contas />, pedidos: <Pedidos />, conciliacao: <Conciliacao />, ajustes: <Ajustes />, privacidade: <Privacidade />, auditoria: <Auditoria /> } as Record<string, React.ReactNode>)[v] ?? <Overview />;
 }
 
 function H({ children }: { children: React.ReactNode }) { return <h1 className="mb-4 text-[24px] font-extrabold">{children}</h1>; }
@@ -198,6 +198,49 @@ function Ajustes() {
     </div>
     <Modal open={!!rej} onClose={() => setRej(null)} title="Recusar ajuste" footer={<Button variant="danger" onClick={async () => { try { await post(`/v1/admin/adjustments/${rej.id}/reject`, { note }); setRej(null); load(); } catch (e) { err(e); setRej(null); } }}>Recusar</Button>}>
       <Textarea label="Motivo" value={note} onChange={e => setNote(e.target.value)} />
+    </Modal>
+  </>);
+}
+
+const PKIND: Record<string, string> = { deletion: 'Exclusão', correction: 'Correção', other: 'Outro' };
+const PSTATUS: Record<string, string> = { pending: 'Em análise', scheduled: 'Programado', done: 'Concluído', rejected: 'Não atendido' };
+
+/** Pedidos de titulares (LGPD art. 18). Prazo de resposta: 15 dias. */
+function Privacidade() {
+  const [status, setStatus] = useState('pending');
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
+  const [sel, setSel] = useState<any>(null);
+  const [decision, setDecision] = useState<'done' | 'rejected'>('done');
+  const [resolution, setResolution] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = () => get(`/v1/admin/privacy?status=${status}`).then(setRows).catch((e: ApiError) => setMsg({ tone: 'bad', text: e.code === 'PERMISSION_DENIED' ? 'Só Compliance acessa os pedidos de privacidade.' : e.title }));
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [status]);
+  const late = (r: any) => r.status === 'pending' && Date.now() - new Date(r.created_at).getTime() > 12 * 86400000;
+  return (<><H>Pedidos de privacidade (LGPD)</H>
+    <p className="-mt-2 mb-4 max-w-2xl text-[14.5px] text-ink-soft">Exclusão de comprador é automática. Aqui ficam as correções, outros pedidos e o encerramento de contas de produtores e afiliados. A LGPD pede resposta em até <b>15 dias</b>.</p>
+    {msg && <Banner tone={msg.tone} className="mb-4">{msg.text}</Banner>}
+    <Card className="p-0">
+      <div className="flex items-center justify-between px-5 py-3"><span className="font-extrabold">Pedidos</span><Select label="" aria-label="Filtrar" value={status} onChange={e => setStatus(e.target.value)}><option value="pending">Em análise</option><option value="scheduled">Programados</option><option value="done">Concluídos</option><option value="rejected">Não atendidos</option><option value="all">Todos</option></Select></div>
+      {!rows ? <Skeleton className="m-5 h-24" /> : rows.length === 0 ? <p className="px-5 pb-5 text-ink-mute">Nada por aqui.</p> : <ul className="divide-y divide-line">{rows.map(r => (
+        <li key={r.id} className="px-5 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-semibold">{PKIND[r.kind]} · {r.subject_type === 'customer' ? 'Comprador' : 'Produtor/afiliado'} · {r.subject?.name ?? '—'} <span className="text-ink-mute">{r.subject?.email}</span></span>
+            <span className="flex items-center gap-2">{late(r) && <Pill tone="bad">Prazo perto do fim</Pill>}<Pill tone={r.status === 'done' ? 'ok' : r.status === 'rejected' ? 'bad' : 'warn'}>{PSTATUS[r.status]}</Pill></span>
+          </div>
+          <p className="text-[13.5px] text-ink-mute">Pedido {ago(r.created_at)}{r.retain_until ? ` · anonimização em ${shortDate(r.retain_until)}` : ''}</p>
+          {r.details && <p className="mt-1 text-[14px]">“{r.details}”</p>}
+          {r.resolution && <p className="mt-1 text-[14px] text-ink-soft">Resposta: {r.resolution}</p>}
+          {r.status === 'pending' && <Button size="sm" variant="secondary" className="mt-2" onClick={() => { setSel(r); setDecision('done'); setResolution(''); }}>Responder</Button>}
+        </li>))}</ul>}
+    </Card>
+    <Modal open={!!sel} onClose={() => setSel(null)} title="Responder ao titular"
+      footer={<Button full loading={busy} disabled={resolution.trim().length < 10} onClick={async () => { setBusy(true); setMsg(null); try { await post(`/v1/admin/privacy/${sel.id}/decision`, { decision, resolution: resolution.trim() }); setSel(null); setMsg({ tone: 'ok', text: 'Resposta registrada e enviada ao titular.' }); load(); } catch (e) { const x = e as ApiError; setMsg({ tone: 'bad', text: Object.values(x.fields ?? {})[0] ?? x.title }); setSel(null); } setBusy(false); }}>Registrar</Button>}>
+      {sel && <>
+        {sel.kind === 'deletion' && sel.subject_type === 'user' && <Banner tone="warn">Concluir encerra a conta: bloqueia o acesso, tira as ofertas do ar e agenda a anonimização para daqui a 5 anos. Só funciona se a conta estiver sem saldo, valores a liberar, contestações e saques em andamento.</Banner>}
+        <Select label="Decisão" className="mt-3" value={decision} onChange={e => setDecision(e.target.value as any)}><option value="done">Atender</option><option value="rejected">Não atender (explique o motivo legal)</option></Select>
+        <Textarea label="Resposta ao titular (vai por e-mail)" className="mt-3" value={resolution} onChange={e => setResolution(e.target.value)} />
+      </>}
     </Modal>
   </>);
 }

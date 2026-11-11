@@ -209,6 +209,51 @@ ok((await req('DELETE', `/v1/customer/cards/${myCards[0]?.id}`, null, { cookie: 
 const after9 = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { method: 'card', one_click: { token: ver.body.token, card_id: ver.body.cards[0].id } }, { headers: { 'idempotency-key': randomUUID() } });
 ok(after9.status === 422, 'cartão removido não pode mais ser usado');
 
+console.log('\n9) Portal LGPD: baixar dados e pedir exclusão');
+const loginCustomer = async (email, jarName) => {
+  await req('POST', '/v1/customer/auth/magic-link', { email });
+  const ob = (await req('GET', '/v1/dev/outbox')).body;
+  const tk = ob.find(n => n.template === 'magic_link')?.body.match(/token=([\w-]+)/)?.[1];
+  return (await req('POST', '/v1/customer/auth/verify', { token: tk }, { cookie: jarName })).status === 200;
+};
+// comprador com compra paga (b1, do passo 1)
+ok(await loginCustomer(b1.email, 'lg1'), 'comprador entra na área de compras');
+const exp = await fetch(API + '/v1/customer/privacy/export', { headers: { 'x-requested-with': 'domma', cookie: jar.lg1 } });
+const expJson = await exp.json();
+ok(exp.status === 200 && /attachment/.test(exp.headers.get('content-disposition') || ''), 'baixa os próprios dados como arquivo');
+ok(expJson.dados_pessoais?.email === b1.email && expJson.compras?.length >= 1 && expJson.dados_pessoais.documento === '52998224725', 'arquivo traz dados pessoais e compras');
+ok((await fetch(API + '/v1/customer/privacy/export', { headers: { 'x-requested-with': 'domma' } })).status === 401, 'sem login não baixa nada');
+const del1 = await req('POST', '/v1/customer/privacy/requests', { kind: 'deletion' }, { cookie: 'lg1' });
+ok(del1.status === 201 && del1.body.status === 'scheduled' && del1.body.retain_until, 'com compra paga: exclusão programada para o fim do prazo legal');
+ok(/cartões guardados/.test(del1.body.resolution) && /obrigação legal/.test(del1.body.resolution), 'resposta explica o que saiu na hora e o que fica guardado');
+const del1b = await req('POST', '/v1/customer/privacy/requests', { kind: 'deletion' }, { cookie: 'lg1' });
+ok(del1b.body.id === del1.body.id, 'pedido repetido não duplica');
+ok((await req('GET', '/v1/customer/privacy/requests', null, { cookie: 'lg1' })).body.length >= 1, 'comprador acompanha os pedidos');
+// comprador sem compra paga: anonimizado na hora
+const bx = buyer(11);
+await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: bx, method: 'pix' }, { headers: { 'idempotency-key': randomUUID() } });
+ok(await loginCustomer(bx.email, 'lg2'), 'comprador sem compra paga entra');
+const del2 = await req('POST', '/v1/customer/privacy/requests', { kind: 'deletion' }, { cookie: 'lg2' });
+ok(del2.body.status === 'done', 'sem compra paga: dados apagados na hora');
+ok((await req('GET', '/v1/customer/purchases', null, { cookie: 'lg2' })).status === 401, 'sessão encerrada depois da exclusão');
+const relog = await loginCustomer(bx.email, 'lg3');
+ok(!relog, 'e-mail apagado não entra mais (dados anonimizados)');
+// produtor
+const pexp = await fetch(API + '/v1/privacy/export', { headers: { 'x-requested-with': 'domma', cookie: jar.prod } });
+const pj = await pexp.json();
+ok(pexp.status === 200 && pj.dados_pessoais?.email === 'produtora@demo.com' && Array.isArray(pj.verificacoes_de_identidade), 'produtor baixa os próprios dados');
+const corr = await req('POST', '/v1/privacy/requests', { kind: 'correction', details: 'Meu nome está sem acento' }, { cookie: 'prod' });
+ok(corr.status === 201 && corr.body.status === 'pending', 'pedido de correção vai para a equipe');
+const pdel = await req('POST', '/v1/privacy/requests', { kind: 'deletion' }, { cookie: 'prod' });
+ok(pdel.body.status === 'pending', 'exclusão de produtor vai para a equipe');
+if (la.status === 200) {
+  const q = (await req('GET', '/v1/admin/privacy?status=pending', null, { cookie: 'adm' })).body;
+  ok(Array.isArray(q) && q.some(r => r.id === pdel.body.id) && q.find(r => r.id === pdel.body.id).subject.email.includes('***'), 'back-office vê a fila (e-mail mascarado)');
+  const blocked = await req('POST', `/v1/admin/privacy/${pdel.body.id}/decision`, { decision: 'done', resolution: 'Conta encerrada a pedido.' }, { cookie: 'adm' });
+  ok(blocked.status === 422 && /saldo/.test(blocked.body.title), 'não encerra conta com saldo ou valores a liberar');
+  ok((await req('POST', `/v1/admin/privacy/${corr.body.id}/decision`, { decision: 'done', resolution: 'Nome corrigido no cadastro.' }, { cookie: 'adm' })).body.status === 'done', 'correção respondida');
+  ok((await req('GET', '/v1/admin/privacy', null, { cookie: 'prod' })).status === 403, 'produtor não acessa a fila da equipe');
+}
 console.log('\n10) Conta do comprador não pode ser tomada pelo checkout');
 const victim = buyer(20);
 const vo = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: victim, method: 'pix' }, { headers: { 'idempotency-key': randomUUID() } });
