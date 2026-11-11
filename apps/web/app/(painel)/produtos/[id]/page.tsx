@@ -5,18 +5,26 @@ import { brl, maskMoney, moneyToCents, pct, shortDate } from '@/lib/format';
 import { netCents } from '@/lib/fees';
 import { uploadFile } from '@/lib/upload';
 import { Button, Card, Field, Select, Textarea, Toggle, Banner, Pill, CopyButton, Skeleton, Modal, cx } from '@/components/ui';
+import { AbTest } from '@/components/ab-test';
 
-const TABS = [['conteudo', 'Conteúdo'], ['preco', 'Preço e parcelas'], ['garantia', 'Garantia e limites'], ['especial', 'Oferta especial'], ['upsell', 'Upsell'], ['cupons', 'Cupons'], ['visual', 'Visual do checkout'], ['pixels', 'Pixels'], ['obrigado', 'Página de obrigado'], ['afiliados', 'Afiliados'], ['socios', 'Sócios']] as const;
+const TABS = [['conteudo', 'Conteúdo'], ['preco', 'Preço e parcelas'], ['garantia', 'Garantia e limites'], ['especial', 'Oferta especial'], ['upsell', 'Upsell'], ['ab', 'Teste A/B'], ['cupons', 'Cupons'], ['visual', 'Visual do checkout'], ['pixels', 'Pixels'], ['obrigado', 'Página de obrigado'], ['afiliados', 'Afiliados'], ['socios', 'Sócios']] as const;
 
 export default function Produto({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [p, setP] = useState<any>(null);
   const [tab, setTab] = useState<string>('conteudo');
   const [msg, setMsg] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
+  const [offerId, setOfferId] = useState<string | null>(null);
   const load = () => get(`/v1/products/${id}`).then(setP);
   useEffect(() => { load(); const a = new URLSearchParams(location.search).get('aba'); if (a) setTab(a === 'garantia' ? 'garantia' : a); }, [id]);
   if (!p) return <Skeleton className="h-96 w-full" />;
-  const offer = p.offers[0];
+  // a maioria das abas edita uma oferta: a escolhida no seletor (padrão: a primeira)
+  const offer = p.offers.find((o: any) => o.id === offerId) ?? p.offers[0];
+  const OFFER_TABS = ['preco', 'garantia', 'especial', 'upsell', 'cupons', 'visual', 'pixels', 'obrigado'];
+  async function duplicate() {
+    try { const r = await post<any>(`/v1/offers/${offer.id}/duplicate`, {}); await load(); setOfferId(r.id); setMsg({ tone: 'ok', text: `Oferta “${r.name}” criada com a mesma configuração. Ajuste o que quiser testar e crie o teste na aba Teste A/B.` }); }
+    catch (e) { setMsg({ tone: 'bad', text: (e as ApiError).title }); }
+  }
 
   async function save(path: string, body: any, method = 'PATCH') {
     setMsg(null);
@@ -39,8 +47,19 @@ export default function Produto({ params }: { params: Promise<{ id: string }> })
       <div className="mt-5 flex gap-1 overflow-x-auto border-b border-line" role="tablist">
         {TABS.filter(([k]) => k !== 'conteudo' || p.type !== 'service').map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => { setTab(k); setMsg(null); }} className={cx('min-h-[44px] flex-none whitespace-nowrap border-b-2 px-3 text-[14.5px] font-semibold', tab === k ? 'border-action text-action' : 'border-transparent text-ink-mute hover:text-ink')}>{l}</button>)}
       </div>
-      <div className="mt-5">
+      {OFFER_TABS.includes(tab) && p.offers.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-end gap-2 rounded-card border border-line bg-white px-4 py-3">
+          <Select label="Oferta" value={offer.id} onChange={e => { setOfferId(e.target.value); setMsg(null); }} className="min-w-[220px] flex-1 sm:flex-none">
+            {p.offers.map((o: any) => <option key={o.id} value={o.id}>{o.name} — {brl(o.price_cents)}{o.status !== 'active' ? ` (${o.status === 'paused' ? 'pausada' : o.status === 'draft' ? 'rascunho' : 'encerrada'})` : ''}</option>)}
+          </Select>
+          <CopyButton text={offer.checkout_url} label="Copiar link desta oferta" size="sm" />
+          <Button size="sm" variant="ghost" onClick={duplicate}>Duplicar oferta</Button>
+          {p.offers.length > 1 && <p className="w-full text-[13px] text-ink-mute">As alterações desta aba valem só para a oferta escolhida.</p>}
+        </div>
+      )}
+      <div className="mt-5" key={offer?.id}>
         {tab === 'conteudo' && <Conteudo p={p} reload={load} setMsg={setMsg} />}
+        {tab === 'ab' && <AbTest p={p} reload={load} setMsg={setMsg} onPickOffer={(oid: string) => { setOfferId(oid); setTab('preco'); }} />}
         {tab === 'preco' && <Preco offer={offer} save={save} />}
         {tab === 'garantia' && <Garantia p={p} offer={offer} save={save} />}
         {tab === 'especial' && <Especial p={p} offer={offer} save={save} />}

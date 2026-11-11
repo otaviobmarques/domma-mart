@@ -503,13 +503,18 @@ model checkout_leads {
 }
 
 model checkout_views {
-  id           String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  workspace_id String   @db.Uuid
-  offer_id     String   @db.Uuid
-  tracking     Json?
-  created_at   DateTime @default(now()) @db.Timestamptz
+  id            String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  workspace_id  String   @db.Uuid
+  offer_id      String   @db.Uuid
+  tracking      Json?
+  /// teste A/B: em qual teste e versão (a | b) o visitante caiu; visitor = id anônimo do cookie
+  experiment_id String?  @db.Uuid
+  variant       String?
+  visitor       String?
+  created_at    DateTime @default(now()) @db.Timestamptz
 
   @@index([workspace_id, created_at])
+  @@index([experiment_id, variant])
 }
 
 enum OrderStatus {
@@ -551,6 +556,9 @@ model orders {
   /// pedido de upsell/downsell: aponta para a compra que abriu o funil
   parent_order_id   String?       @db.Uuid
   funnel_step       String? // upsell | downsell
+  /// teste A/B do checkout em que a venda aconteceu
+  experiment_id     String?       @db.Uuid
+  experiment_variant String? // a | b
   tracking          Json?
   ip_hash           String
   user_agent        String
@@ -570,6 +578,7 @@ model orders {
 
   @@index([workspace_id, created_at])
   @@index([customer_id])
+  @@index([experiment_id])
   @@unique([parent_order_id, funnel_step])
 }
 
@@ -1038,5 +1047,29 @@ model api_keys {
   revoked_at        DateTime? @db.Timestamptz
   revoked_by        String?   @db.Uuid
 
+  @@index([workspace_id])
+}
+
+/// Teste A/B do checkout: a oferta de controle (A, o link divulgado) e uma variante (B) do mesmo produto
+model checkout_experiments {
+  id               String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  workspace_id     String    @db.Uuid
+  product_id       String    @db.Uuid
+  control_offer_id String    @db.Uuid
+  variant_offer_id String    @db.Uuid
+  name             String
+  /// % dos visitantes que veem a versão B
+  split_pct        Int       @default(50)
+  /// métrica que decide: conversion (vendas ÷ visitantes) ou revenue (receita por visitante)
+  metric           String    @default("conversion")
+  status           String    @default("running") // running | paused | ended
+  /// no fim: a | b. Com b, o link da oferta A passa a mostrar a B para todos
+  winner           String?
+  started_at       DateTime  @default(now()) @db.Timestamptz
+  ended_at         DateTime? @db.Timestamptz
+  created_by       String    @db.Uuid
+  created_at       DateTime  @default(now()) @db.Timestamptz
+
+  @@index([control_offer_id, status])
   @@index([workspace_id])
 }

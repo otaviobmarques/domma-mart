@@ -57,8 +57,16 @@ export class CheckoutController {
   constructor(private svc: CheckoutService, private funnel: FunnelService, private prisma: PrismaService, private events: EventEmitter2, @Inject(GATEWAY) private gateway: GatewayAdapter) {}
 
   @Get('v1/public/offers/:slug')
-  async offer(@Param('slug') slug: string, @Query() q: Record<string, string>, @Req() req: R) {
-    return toJSON(await this.svc.publicOffer(slug, Object.fromEntries(Object.entries(q).filter(([k]) => /^(utm_|src|ref|fbclid|gclid)/.test(k))), requestHost(req)));
+  async offer(@Param('slug') slug: string, @Query() q: Record<string, string>, @Req() req: R, @Res({ passthrough: true }) res: Response) {
+    const cookies = (req.cookies ?? {}) as Record<string, string>;
+    const ab = Object.fromEntries(Object.entries(cookies).filter(([k]) => k.startsWith('dm_ab_')).map(([k, v]) => [k.slice(6), v]));
+    const r = await this.svc.publicOffer(slug, Object.fromEntries(Object.entries(q).filter(([k]) => /^(utm_|src|ref|fbclid|gclid)/.test(k))), requestHost(req), { visitor: cookies.dm_vid, ab });
+    // visitante anônimo (contagem de visitantes únicos) e versão do teste A/B: sempre a mesma para a mesma pessoa
+    const secure = (process.env.APP_URL || '').startsWith('https');
+    res.cookie('dm_vid', r.visitor, { maxAge: 365 * 86400000, httpOnly: true, sameSite: 'lax', secure });
+    if (r.experiment) res.cookie(`dm_ab_${r.experiment.id}`, r.experiment.variant, { maxAge: 90 * 86400000, httpOnly: true, sameSite: 'lax', secure });
+    const { visitor: _v, ...out } = r;
+    return toJSON(out);
   }
 
   @Post('v1/public/coupons/validate') @HttpCode(200)
@@ -105,7 +113,7 @@ export class CheckoutController {
     if (!idem || idem.length < 16 || idem.length > 100) throw new AppError('IDEMPOTENCY_KEY_REQUIRED');
     if (!(await verifyTurnstile(captcha, clientIp(req)))) throw new AppError('RATE_LIMITED');
     const body = parse(OrderSchema, b);
-    const r = await this.svc.createOrder(offerId, body, { ip: clientIp(req), ua: String(req.headers['user-agent'] || ''), idempotencyKey: `co:${idem}`, affiliateCookie: req.cookies?.[`dm_aff_${offerId}`] || req.cookies?.dm_aff, host: requestHost(req), country: trustedClientCountry(req as any) });
+    const r = await this.svc.createOrder(offerId, body, { ip: clientIp(req), ua: String(req.headers['user-agent'] || ''), idempotencyKey: `co:${idem}`, affiliateCookie: req.cookies?.[`dm_aff_${offerId}`] || req.cookies?.dm_aff, host: requestHost(req), country: trustedClientCountry(req as any), cookies: req.cookies ?? {} });
     return toJSON(r);
   }
 

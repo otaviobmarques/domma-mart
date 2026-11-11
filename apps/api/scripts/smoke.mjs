@@ -570,5 +570,55 @@ console.log('\n15) API pública (chaves, permissões, paginação, cupons, webho
   await req('DELETE', `/v1/settings/api-keys/${k1.body.id}`, null, P);
 }
 
+console.log('\n16) Teste A/B do checkout');
+{
+  const P = { cookie: 'prod' };
+  const prod = (await req('GET', '/v1/products', null, P)).body.find(x => x.name.startsWith('Mentoria de Bolos'));
+  const det = (await req('GET', `/v1/products/${prod.id}`, null, P)).body;
+  const A = det.offers[0];
+  const dup = await req('POST', `/v1/offers/${A.id}/duplicate`, {}, P);
+  ok(dup.status === 201 && dup.body.id !== A.id && dup.body.slug !== A.slug && dup.body.price_cents === A.price_cents && dup.body.status === 'active', 'duplicar oferta cria a versão B com a mesma configuração e novo link');
+  await req('PATCH', `/v1/offers/${dup.body.id}`, { price_cents: 39700 }, P);
+  ok((await req('POST', `/v1/products/${prod.id}/experiments`, { name: 'x', control_offer_id: A.id, variant_offer_id: A.id }, P)).status === 422, 'A e B precisam ser ofertas diferentes');
+  const ex = await req('POST', `/v1/products/${prod.id}/experiments`, { name: 'Preço R$ 497 x R$ 397', control_offer_id: A.id, variant_offer_id: dup.body.id, split_pct: 50, metric: 'revenue' }, P);
+  ok(ex.status === 201 && ex.body.status === 'running', 'teste A/B começa');
+  ok((await req('POST', `/v1/products/${prod.id}/experiments`, { name: 'outro', control_offer_id: A.id, variant_offer_id: dup.body.id }, P)).status === 422, 'oferta não entra em dois testes ao mesmo tempo');
+  // visitantes do link da oferta A são divididos
+  const seen = { a: 0, b: 0 }; let bJar = null, aJar = null;
+  for (let i = 0; i < 30; i++) {
+    const r = (await req('GET', `/v1/public/offers/${A.slug}`, null, { cookie: `ab${i}` })).body;
+    seen[r.experiment.variant]++;
+    if (r.experiment.variant === 'b' && r.offer_id !== dup.body.id) seen.wrong = true;
+    if (r.experiment.variant === 'b' && !bJar) bJar = `ab${i}`;
+    if (r.experiment.variant === 'a' && !aJar) aJar = `ab${i}`;
+  }
+  ok(seen.a > 0 && seen.b > 0 && !seen.wrong, `visitantes divididos entre A e B (${seen.a} / ${seen.b}); a B mostra a oferta B`);
+  const again = (await req('GET', `/v1/public/offers/${A.slug}`, null, { cookie: bJar })).body;
+  ok(again.experiment.variant === 'b' && again.offer_id === dup.body.id, 'o mesmo visitante vê sempre a mesma versão');
+  // compra na B, com cupom só da oferta A e link de afiliado
+  const cc = await req('POST', '/v1/coupons', { code: `AB${Date.now() % 100000}`, kind: 'percent', value: 1000, offer_ids: [A.id] }, P);
+  ok((await req('POST', '/v1/public/coupons/validate', { offer_id: dup.body.id, code: cc.body.code })).status === 200, 'cupom da oferta A vale para quem caiu na B');
+  const cpfAB = (() => { const d = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)); for (const n of [9, 10]) { const s = d.reduce((a, x, i) => a + x * (n + 1 - i), 0); d.push((s * 10) % 11 % 10); } return d.join(''); })();
+  const ob = await req('POST', `/v1/checkout/${dup.body.id}/orders`, { customer: { ...buyer(30), document: cpfAB }, method: 'pix', coupon_code: cc.body.code }, { cookie: bJar, headers: { 'idempotency-key': randomUUID(), 'x-forwarded-for': '198.51.100.40' } });
+  ok(ob.status === 201 && ob.body.total_cents === 39700 - 3970, 'venda na versão B com o preço da B e o cupom');
+  await req('POST', `/v1/dev/sandbox/orders/${ob.body.order_id}/pay`, { t: new URL('http://x' + ob.body.next.url).searchParams.get('t') });
+  await sleep(1200);
+  const list = (await req('GET', `/v1/products/${prod.id}/experiments`, null, P)).body;
+  const cur = list.find(e => e.id === ex.body.id);
+  ok(cur.b.sales === 1 && cur.b.revenue === 39700 - 3970 && cur.a.sales === 0 && cur.a.visitors + cur.b.visitors === 30, `resultado conta visitantes únicos e a venda paga na B (A ${cur.a.visitors} · B ${cur.b.visitors})`);
+  ok(cur.result.enough_data === false && cur.result.leader === null, 'sem amostra mínima, nenhum vencedor é apontado');
+  // pausa: todos veem A e nada conta
+  await req('POST', `/v1/experiments/${ex.body.id}/pause`, {}, P);
+  const paused = (await req('GET', `/v1/public/offers/${A.slug}`, null, { cookie: bJar })).body;
+  ok(paused.offer_id === A.id && paused.experiment === null, 'pausado: todos veem a A, fora do teste');
+  await req('POST', `/v1/experiments/${ex.body.id}/resume`, {}, P);
+  // encerra com B vencedora: o link de A passa a mostrar B
+  const ended = await req('POST', `/v1/experiments/${ex.body.id}/end`, { winner: 'b' }, P);
+  ok(ended.status === 200 && ended.body.status === 'ended' && ended.body.winner === 'b', 'teste encerrado com a B vencedora');
+  const after = (await req('GET', `/v1/public/offers/${A.slug}`, null, { cookie: aJar })).body;
+  ok(after.offer_id === dup.body.id && after.experiment === null, 'depois do teste, o link de A mostra a B para todos (inclusive quem estava na A)');
+  ok((await req('POST', `/v1/experiments/${ex.body.id}/pause`, {}, P)).status === 409, 'teste encerrado não volta a rodar');
+}
+
 console.log(`\n${pass} ok, ${fail} falhas\n`);
 process.exit(fail ? 1 : 0);
