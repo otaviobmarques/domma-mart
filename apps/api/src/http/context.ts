@@ -1,3 +1,4 @@
+import { trustedClientIp } from './edge';
 import { createParamDecorator, ExecutionContext, SetMetadata } from '@nestjs/common';
 import type { Request } from 'express';
 
@@ -32,7 +33,7 @@ export const Ctx = createParamDecorator((_d, c: ExecutionContext) => c.switchToH
 export const Cust = createParamDecorator((_d, c: ExecutionContext) => c.switchToHttp().getRequest<Req>().customer!);
 
 export function clientIp(req: Request): string {
-  return (req.headers['cf-connecting-ip'] as string) || (req.headers['x-forwarded-for'] as string || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
+  return trustedClientIp(req as any);
 }
 
 /** Permissões internas Domma por papel (seção 2). */

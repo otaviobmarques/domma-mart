@@ -122,6 +122,10 @@ Resultado com **1 processo da API** (4 vCPUs divididas com Postgres, Redis e o p
 
 O gargalo era desenhar o QR Code do Pix em PNG (metade da CPU); agora é SVG. Cada processo aguenta **~65 pedidos Pix por segundo** (~230 mil por hora) sem erro; acima disso, a fila cresce mas nada falha. Para lançamentos maiores, aumente as réplicas da API no Railway (ela não guarda estado: sessão, fila e limites ficam no Redis) e confira o limite de conexões do banco.
 
+## Acesso só pelo site
+
+Com `EDGE_SECRET` definido **na API (Railway) e no site (Vercel)** com o mesmo valor, o proxy do site carimba cada chamada para a API com esse segredo e com o IP real do visitante (que a Vercel conhece e não deixa forjar). A API recusa qualquer chamada sem o carimbo — por exemplo, direto no domínio `*.up.railway.app` —, então ninguém consegue escolher o próprio IP para furar os limites (pedidos, cupons, código do 1 clique, antifraude). Ficam abertos só `/health` e `/webhooks/*` (os gateways chamam direto, com assinatura própria). Sem `EDGE_SECRET` (desenvolvimento, CI, teste de carga), a API confia em `X-Forwarded-For` como antes. Teste: `apps/api/scripts/edge.test.mjs`.
+
 ## Pendências antes de produção
 
 - **Gateway real**: chaves de teste da Pagar.me para validar o adaptador contra o ambiente deles antes de produção. Afiliados e coprodutores também precisam de identidade + conta bancária para receber a parte deles na Pagar.me.

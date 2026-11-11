@@ -4,7 +4,7 @@ const API = process.env.API_URL || 'http://127.0.0.1:4000';
 /** Verificação pública do certificado (RN-94). */
 export default async function Certificado({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
-  const r = await fetch(`${API}/v1/members/certificates/${encodeURIComponent(code)}`, { cache: 'no-store' });
+  const r = await fetch(`${API}/v1/members/certificates/${encodeURIComponent(code)}`, { cache: 'no-store', headers: process.env.EDGE_SECRET ? { 'x-domma-edge': process.env.EDGE_SECRET } : {} });
   const c = r.ok ? await r.json() : null;
   return (
     <main className="mx-auto max-w-3xl px-4 py-10">

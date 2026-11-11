@@ -94,9 +94,23 @@ jobs:
           node dist/main.js > api-pagarme.log 2>&1 &
           for i in $(seq 1 60); do curl -sf localhost:4100/health && break; sleep 1; done
           API=http://localhost:4100 node scripts/pagarme.test.mjs
+      - name: Acesso só pelo site (EDGE_SECRET)
+        working-directory: apps/api
+        shell: bash
+        env:
+          EDGE_SECRET: segredo-de-teste-edge
+          API_PORT: '4200'
+          PORT: '4200'
+        run: |
+          set -o pipefail
+          pkill -f "node dist/main.js" || true
+          sleep 1
+          node dist/main.js > api-edge.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:4200/health && break; sleep 1; done
+          API=http://localhost:4200 node scripts/edge.test.mjs
       - name: Log da API em caso de falha
         if: failure()
-        run: tail -200 apps/api/api.log apps/api/api-pagarme.log || true
+        run: tail -200 apps/api/api.log apps/api/api-pagarme.log apps/api/api-edge.log || true
       - name: Vulnerabilidades críticas
         run: npm audit --omit=dev --audit-level=critical
 
