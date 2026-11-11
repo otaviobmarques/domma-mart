@@ -862,3 +862,22 @@ model custom_domains {
 
   @@index([workspace_id])
 }
+
+// Ajuste manual de saldo com aprovação de 2 pessoas do Financeiro Domma (RN-38)
+model ledger_adjustments {
+  id             String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  workspace_id   String    @db.Uuid
+  amount_cents   BigInt // positivo = crédito ao produtor; negativo = débito
+  reason         String
+  requested_by   String    @db.Uuid
+  decided_by     String?   @db.Uuid
+  decision_note  String?
+  status         String    @default("pending") // pending | approved | rejected | cancelled
+  transaction_id String?   @db.Uuid
+  decided_at     DateTime? @db.Timestamptz
+  created_at     DateTime  @default(now()) @db.Timestamptz
+  updated_at     DateTime  @updatedAt @db.Timestamptz
+
+  @@index([status, created_at])
+  @@index([workspace_id])
+}
