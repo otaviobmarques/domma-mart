@@ -47,8 +47,16 @@ export class CheckoutService {
     return offer;
   }
 
-  async publicOffer(slug: string, tracking: Record<string, string>) {
+  /** Num domínio próprio ativo, só as ofertas do dono do domínio podem ser vendidas. */
+  async assertHost(workspaceId: string, host?: string) {
+    if (!host) return;
+    const d = await this.prisma.custom_domains.findUnique({ where: { hostname: host.toLowerCase().split(':')[0] } });
+    if (d && d.status === 'active' && d.workspace_id !== workspaceId) throw new AppError('OFFER_UNAVAILABLE');
+  }
+
+  async publicOffer(slug: string, tracking: Record<string, string>, host?: string) {
     const offer = await this.loadSellableOffer({ slug });
+    await this.assertHost(offer.workspace_id, host);
     const p = offer.product;
     const bumps = await this.prisma.offers.findMany({ where: { id: { in: offer.bumps.map(b => b.bump_offer_id) }, status: 'active' }, include: { product: true } });
     await this.prisma.checkout_views.create({ data: { workspace_id: offer.workspace_id, offer_id: offer.id, tracking } });
@@ -102,7 +110,7 @@ export class CheckoutService {
   }
 
   /** POST /v1/checkout/{offerId}/orders — seção 8.2/8.3 e contrato 22.1. */
-  async createOrder(offerId: string, body: CreateOrderBody, meta: { ip: string; ua: string; idempotencyKey: string; affiliateCookie?: string }) {
+  async createOrder(offerId: string, body: CreateOrderBody, meta: { ip: string; ua: string; idempotencyKey: string; affiliateCookie?: string; host?: string }) {
     // RN-30: mesma chave devolve o mesmo resultado sem nova cobrança
     const prior = await this.prisma.orders.findUnique({ where: { idempotency_key: meta.idempotencyKey }, include: { payments: { orderBy: { created_at: 'desc' }, take: 1 } } });
     if (prior) return this.responseFor(prior, prior.payments[0]);
@@ -110,6 +118,7 @@ export class CheckoutService {
     const ipHash = hashIp(meta.ip);
     await rl.limit(`order:ip:${ipHash}`, 30, 600);
     const offer = await this.loadSellableOffer({ id: offerId });
+    await this.assertHost(offer.workspace_id, meta.host);
     if (!offer.methods.includes(body.method)) throw new AppError('VALIDATION_ERROR', { fields: { method: 'Forma de pagamento indisponível.' } });
     if (offer.billing_type === 'subscription' && body.method !== 'card') throw new AppError('VALIDATION_ERROR', { fields: { method: 'Assinaturas são cobradas no cartão.' } });
 

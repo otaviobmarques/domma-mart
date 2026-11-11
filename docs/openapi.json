@@ -248,261 +248,6 @@
         }
       }
     },
-    "/v1/admin/adjustments": {
-      "get": {
-        "operationId": "Adjustments_list",
-        "tags": [
-          "admin"
-        ],
-        "summary": "list",
-        "description": "Acesso: admin (permissão ledger.adjust).",
-        "security": [
-          {
-            "producerSession": []
-          }
-        ],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Erro (RFC 7807)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "operationId": "Adjustments_request",
-        "tags": [
-          "admin"
-        ],
-        "summary": "request",
-        "description": "Acesso: admin (permissão ledger.adjust). Exige o cabeçalho X-Requested-With: domma (CSRF).",
-        "security": [
-          {
-            "producerSession": []
-          }
-        ],
-        "parameters": [],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Erro (RFC 7807)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/admin/adjustments/{id}/approve": {
-      "post": {
-        "operationId": "Adjustments_approve",
-        "tags": [
-          "admin"
-        ],
-        "summary": "approve",
-        "description": "Acesso: admin (permissão ledger.adjust). Exige o cabeçalho X-Requested-With: domma (CSRF).",
-        "security": [
-          {
-            "producerSession": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Erro (RFC 7807)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/admin/adjustments/{id}/cancel": {
-      "post": {
-        "operationId": "Adjustments_cancel",
-        "tags": [
-          "admin"
-        ],
-        "summary": "cancel",
-        "description": "Acesso: admin (permissão ledger.adjust). Exige o cabeçalho X-Requested-With: domma (CSRF).",
-        "security": [
-          {
-            "producerSession": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Erro (RFC 7807)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/admin/adjustments/{id}/reject": {
-      "post": {
-        "operationId": "Adjustments_reject",
-        "tags": [
-          "admin"
-        ],
-        "summary": "reject",
-        "description": "Acesso: admin (permissão ledger.adjust). Exige o cabeçalho X-Requested-With: domma (CSRF).",
-        "security": [
-          {
-            "producerSession": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Erro (RFC 7807)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/admin/audit": {
       "get": {
         "operationId": "Admin_auditLog",
@@ -5085,6 +4830,49 @@
         }
       }
     },
+    "/v1/public/domains/{host}": {
+      "get": {
+        "operationId": "Domains_resolve",
+        "tags": [
+          "public"
+        ],
+        "summary": "resolve",
+        "description": "Acesso: public.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "host",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/public/offers/{slug}": {
       "get": {
         "operationId": "Checkout_offer",
@@ -5186,6 +4974,194 @@
           }
         ],
         "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/settings/domains": {
+      "get": {
+        "operationId": "Domains_list",
+        "tags": [
+          "settings"
+        ],
+        "summary": "list",
+        "description": "Acesso: producer (permissão settings.manage).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "Domains_add",
+        "tags": [
+          "settings"
+        ],
+        "summary": "add",
+        "description": "Acesso: producer (permissão settings.manage). Exige o cabeçalho X-Requested-With: domma (CSRF).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/settings/domains/{id}": {
+      "delete": {
+        "operationId": "Domains_remove",
+        "tags": [
+          "settings"
+        ],
+        "summary": "remove",
+        "description": "Acesso: producer (permissão settings.manage). Exige o cabeçalho X-Requested-With: domma (CSRF).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/settings/domains/{id}/verify": {
+      "post": {
+        "operationId": "Domains_verify",
+        "tags": [
+          "settings"
+        ],
+        "summary": "verify",
+        "description": "Acesso: producer (permissão settings.manage). Exige o cabeçalho X-Requested-With: domma (CSRF).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -5986,6 +5962,7 @@
               "WEAK_PASSWORD",
               "PWNED_PASSWORD",
               "SALES_PAUSED_KYC",
+              "DOMAINS_UNAVAILABLE",
               "INTERNAL_ERROR"
             ]
           },
