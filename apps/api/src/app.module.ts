@@ -29,6 +29,7 @@ import { AffiliatesController } from './modules/affiliates/affiliates.controller
 import { SettingsController } from './modules/settings/settings.controller';
 import { AdminController, DevController } from './modules/admin/admin.controller';
 import { HealthController } from './health.controller';
+import { AdjustmentsController } from './modules/adjustments/adjustments.controller';
 import { DomainsController } from './modules/domains/domains.controller';
 
 /** Adaptador de gateway escolhido por configuração (P3 — multigateway). */
@@ -43,7 +44,7 @@ function gatewayFactory() {
   controllers: [
     HealthController, CheckoutController, WebhooksController, SandboxController, AuthController, CustomerController, OptOutController,
     ProductsController, MembersController, FilesController, DashboardController, KycController, AffiliatesController, SettingsController,
-    AdminController, DevController, DomainsController,
+    AdminController, DevController, DomainsController, AdjustmentsController,
   ],
   providers: [
     PrismaService, AuditService, StorageService, QueueService, NotifyService, LedgerService, OrdersService, CheckoutService, JobsService, FinanceService,
