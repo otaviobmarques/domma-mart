@@ -32,6 +32,7 @@ model users {
   name              String
   phone_enc         Bytes?
   password_hash     String?
+  google_sub        String?      @unique
   email_verified_at DateTime?    @db.Timestamptz
   totp_secret_enc   Bytes?
   totp_enabled_at   DateTime?    @db.Timestamptz

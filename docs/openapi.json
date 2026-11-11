@@ -1582,6 +1582,74 @@
         }
       }
     },
+    "/v1/auth/google/callback": {
+      "get": {
+        "operationId": "GoogleAuth_callback",
+        "tags": [
+          "auth"
+        ],
+        "summary": "callback",
+        "description": "Acesso: public.",
+        "security": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/google/start": {
+      "get": {
+        "operationId": "GoogleAuth_start",
+        "tags": [
+          "auth"
+        ],
+        "summary": "start",
+        "description": "Acesso: public.",
+        "security": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/auth/login": {
       "post": {
         "operationId": "Auth_login",
@@ -1731,6 +1799,40 @@
             "producerSession": []
           }
         ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/providers": {
+      "get": {
+        "operationId": "GoogleAuth_providers",
+        "tags": [
+          "auth"
+        ],
+        "summary": "providers",
+        "description": "Acesso: public.",
+        "security": [],
         "parameters": [],
         "responses": {
           "200": {

@@ -1,5 +1,6 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { GoogleButton } from '@/components/google-button';
 import { post, ApiError } from '@/lib/api';
 import { maskPhone } from '@/lib/format';
 import { Button, Field, Card, Banner, Logo } from '@/components/ui';
@@ -15,6 +16,8 @@ export default function CriarConta() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const s = strength(f.password);
+  const [fromGoogle, setFromGoogle] = useState(false);
+  useEffect(() => { const q = new URLSearchParams(location.search); if (q.get('google') === '1') { setFromGoogle(true); setF(x => ({ ...x, email: q.get('email') ?? x.email })); } }, []);
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setErr(null);
     const ee: Record<string, string> = {};
@@ -33,6 +36,7 @@ export default function CriarConta() {
       <Card>
         <h1 className="text-[22px] font-extrabold">Comece a vender hoje</h1>
         <p className="mt-1 text-ink-soft">Sem mensalidade. Você só paga 4,49% + R$ 1,49 quando vender.</p>
+        {fromGoogle && <Banner tone="info" className="mt-4">Para criar sua conta com Google, aceite os termos abaixo e clique em “Continuar com Google” de novo.</Banner>}
         <form onSubmit={submit} className="mt-5 space-y-4" noValidate>
           <Field label="Seu nome" autoComplete="name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} error={errors.name} />
           <Field label="E-mail" type="email" autoComplete="email" value={f.email} onChange={e => setF({ ...f, email: e.target.value })} error={errors.email} />
@@ -46,6 +50,7 @@ export default function CriarConta() {
           {err && <Banner tone="bad">{err}</Banner>}
           <Button type="submit" size="lg" full loading={busy}>Criar conta</Button>
         </form>
+        <GoogleButton href="/v1/auth/google/start?aceite=1&volta=/inicio" disabled={!accept} onBlocked={() => setErrors(x => ({ ...x, accept: 'Para continuar, aceite os termos.' }))} />
         <p className="mt-4 text-center text-[14px]">Já tem conta? <a href="/entrar" className="font-semibold text-action">Entrar</a></p>
       </Card>
     </main>
