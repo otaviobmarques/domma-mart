@@ -2,6 +2,7 @@
 //
 //   k6 run load/checkout.k6.js                                   # contra a API local (http://localhost:4000)
 //   k6 run -e BASE_URL=https://<api> -e SLUG=<oferta> -e PEAK=80 load/checkout.k6.js
+//   k6 run -e BASE_URL=https://<api>.up.railway.app -e EDGE_SECRET=<segredo> -e PEAK=30 load/checkout.k6.js   # API com EDGE_SECRET
 //
 // Cada "comprador": abre a oferta, gera um pedido Pix e abre a tela do Pix — o caminho mais quente de um
 // lançamento (Pix é a maioria das vendas de infoproduto). Compradores diferentes vêm de IPs diferentes
@@ -14,6 +15,8 @@ import { Trend, Counter } from 'k6/metrics';
 const BASE = __ENV.BASE_URL || 'http://localhost:4000';
 const SLUG = __ENV.SLUG || 'confeitaria';
 const PEAK = Number(__ENV.PEAK || 50); // compradores por segundo no pico
+// API protegida por EDGE_SECRET (só o site acessa): o teste se identifica como o site e informa o IP do comprador
+const EDGE = __ENV.EDGE_SECRET || '';
 const HOLD = __ENV.HOLD || '2m';
 
 const offerTime = new Trend('tempo_oferta', true);
@@ -54,13 +57,14 @@ const uuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => 
 const ip = () => `10.${(Math.random() * 255) | 0}.${(Math.random() * 255) | 0}.${1 + ((Math.random() * 253) | 0)}`;
 
 export function setup() {
-  const r = http.get(`${BASE}/v1/public/offers/${SLUG}`);
+  const r = http.get(`${BASE}/v1/public/offers/${SLUG}`, { headers: EDGE ? { 'x-domma-edge': EDGE } : {} });
   if (r.status !== 200) fail(`oferta ${SLUG} não abriu (${r.status}) — confira BASE_URL e SLUG`);
   return { offerId: r.json('offer_id') };
 }
 
 export default function (data) {
-  const h = { 'content-type': 'application/json', 'x-requested-with': 'domma', 'x-forwarded-for': ip() };
+  const buyerIp = ip();
+  const h = { 'content-type': 'application/json', 'x-requested-with': 'domma', 'x-forwarded-for': buyerIp, ...(EDGE ? { 'x-domma-edge': EDGE, 'x-domma-client-ip': buyerIp } : {}) };
   const o = http.get(`${BASE}/v1/public/offers/${SLUG}?utm_source=carga`, { headers: h, tags: { etapa: 'oferta' } });
   offerTime.add(o.timings.duration);
   if (!check(o, { 'oferta 200': r => r.status === 200 })) return;
