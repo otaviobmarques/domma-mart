@@ -31,9 +31,9 @@ jobs:
       REDIS_URL: redis://localhost:6379
       APP_URL: http://localhost:3000
       API_PORT: '4000'
-      FIELD_ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000001
-      HMAC_KEY: 0000000000000000000000000000000000000000000000000000000000000002
-      SIGNING_KEY: 0000000000000000000000000000000000000000000000000000000000000003
+      FIELD_ENCRYPTION_KEY: '0000000000000000000000000000000000000000000000000000000000000001'
+      HMAC_KEY: '0000000000000000000000000000000000000000000000000000000000000002'
+      SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000003'
       GATEWAY_PROVIDER: sandbox
       GATEWAY_WEBHOOK_SECRET: ci_sandbox_secret
       STORAGE_DIR: ./storage
@@ -57,10 +57,16 @@ jobs:
           git diff --exit-code docs/openapi.json || (echo "::error::docs/openapi.json desatualizado — rode 'npm run openapi -w apps/api' e faça commit" && exit 1)
       - name: Seed
         working-directory: apps/api
-        run: node dist/seed.js | tee seed.txt
+        shell: bash
+        run: |
+          set -o pipefail
+          node dist/seed.js | tee seed.txt
       - name: Ponta a ponta (smoke)
         working-directory: apps/api
+        shell: bash
         run: |
+          set -o pipefail
+          test -n "$(grep 'produtora@demo.com' seed.txt)" || { echo '::error::seed não gerou a produtora'; exit 1; }
           node dist/main.js > api.log 2>&1 &
           for i in $(seq 1 60); do curl -sf localhost:4000/health && break; sleep 1; done
           export PROD_TOTP=$(grep 'produtora@demo.com' seed.txt | sed -E 's/.*TOTP: ([A-Z2-7]+).*/\1/')
