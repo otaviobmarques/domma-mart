@@ -20,9 +20,11 @@ export default function Financeiro() {
   const [totpCode, setTotpCode] = useState('');
   const [keyOpen, setKeyOpen] = useState(false);
   const [pixKey, setPixKey] = useState('');
+  const [bank, setBank] = useState({ bank: '', branch: '', account: '', account_digit: '', type: 'checking' as 'checking' | 'savings' });
   const [keyOtp, setKeyOtp] = useState('');
   const [period, setPeriod] = useState({ from: '', to: '' });
 
+  const bankMode = me?.payout_mode === 'bank_account';
   const load = async () => {
     setB(await get('/v1/finance/balance'));
     const q = new URLSearchParams(Object.fromEntries(Object.entries({ from: period.from ? new Date(period.from + 'T00:00:00-03:00').toISOString() : '', to: period.to ? new Date(period.to + 'T23:59:59-03:00').toISOString() : '' }).filter(([, v]) => v)));
@@ -59,11 +61,11 @@ export default function Financeiro() {
           </> : <>
             <p className="text-[15px] font-semibold text-ink-mute">Você pode sacar agora</p>
             <p className="num mt-1 text-[36px] font-bold leading-none">{brl(b.available_cents)}</p>
-            <p className="mt-2 text-[14px] text-ink-mute">Saque grátis por Pix. Cai na sua conta em minutos.</p>
+            <p className="mt-2 text-[14px] text-ink-mute">{bankMode ? 'Saque para sua conta bancária. Cai em até 1 dia útil.' : 'Saque grátis por Pix. Cai na sua conta em minutos.'}</p>
           </>}
           <div className="mt-4">
             {b.kyc_status !== 'approved' ? <><Button size="lg" disabled>Sacar para minha conta</Button><p className="mt-2 text-[14px] text-ink-mute">Confirme sua identidade para sacar. <a href="/identidade" className="font-semibold text-action">Confirmar agora</a></p></>
-              : !b.payout_account ? <Button size="lg" onClick={() => setKeyOpen(true)}>Cadastrar chave Pix</Button>
+              : !b.payout_account ? <Button size="lg" onClick={() => setKeyOpen(true)}>{bankMode ? 'Cadastrar conta bancária' : 'Cadastrar chave Pix'}</Button>
               : <Button size="lg" disabled={b.available_cents < 1000} onClick={startWithdraw}>Sacar para minha conta</Button>}
           </div>
           {mv?.processing_withdrawals?.map((w: any) => <p key={w.id} className="mt-3 text-[14px]">Saque para sua conta — <b>Processando</b> <span className="num">{brl(w.amount_cents)}</span></p>)}
@@ -75,10 +77,10 @@ export default function Financeiro() {
       </div>
 
       <Card>
-        <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-extrabold">Conta de saque</h2>{b.payout_account && <Button size="sm" variant="secondary" onClick={() => { if (!me.user.totp_enabled) setupTotp(); else setKeyOpen(true); }}>Alterar conta de saque</Button>}</div>
+        <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-extrabold">Conta de saque</h2>{!b.payout_account && bankMode && b.kyc_status !== 'approved' && <Button size="sm" onClick={() => { if (!me.user.totp_enabled) setupTotp(); else setKeyOpen(true); }}>Cadastrar conta bancária</Button>}{b.payout_account && <Button size="sm" variant="secondary" onClick={() => { if (!me.user.totp_enabled) setupTotp(); else setKeyOpen(true); }}>Alterar conta de saque</Button>}</div>
         {b.payout_account ? <div className="mt-2 text-[14.5px]"><p><span className="num font-semibold">{b.payout_account.pix_key_masked}</span> · {b.payout_account.holder_name} {b.kyc_status === 'approved' && <Pill tone="ok">Identidade verificada</Pill>}</p>
-          {b.payout_account.cooling_down && <p className="mt-1 text-[#7A4500]">Sua nova chave Pix poderá receber saques a partir de {dateTime(b.payout_account.active_from)}.</p>}
-          <p className="mt-1 text-[13px] text-ink-mute">Por segurança, uma chave nova só recebe saques 24 h depois do cadastro.</p></div> : <p className="mt-2 text-ink-mute">Nenhuma chave cadastrada. Use uma chave Pix no seu CPF/CNPJ.</p>}
+          {b.payout_account.cooling_down && <p className="mt-1 text-[#7A4500]">Sua nova {bankMode ? 'conta' : 'chave Pix'} poderá receber saques a partir de {dateTime(b.payout_account.active_from)}.</p>}
+          <p className="mt-1 text-[13px] text-ink-mute">Por segurança, uma {bankMode ? 'conta nova' : 'chave nova'} só recebe saques 24 h depois do cadastro.</p></div> : <p className="mt-2 text-ink-mute">{bankMode ? 'Nenhuma conta cadastrada. Use uma conta bancária no seu CPF/CNPJ — ela é necessária para começar a vender.' : 'Nenhuma chave cadastrada. Use uma chave Pix no seu CPF/CNPJ.'}</p>}
       </Card>
 
       <Card className="p-0">
@@ -116,9 +118,20 @@ export default function Financeiro() {
       </Modal>
 
       <Modal open={keyOpen} onClose={() => setKeyOpen(false)} title="Conta de saque"
-        footer={<Button full loading={busy} onClick={async () => { setBusy(true); setErr(null); try { await api('PUT', '/v1/finance/payout-account', { pix_key: pixKey }, { otp: keyOtp }); setKeyOpen(false); load(); } catch (e) { setErr(Object.values((e as ApiError).fields ?? {})[0] ?? (e as ApiError).title); } setBusy(false); }}>Salvar chave</Button>}>
-        <p className="text-[14.5px] text-ink-soft">A chave precisa estar no mesmo CPF/CNPJ da sua conta. Uma chave nova só recebe saques depois de 24 h.</p>
-        <Field className="mt-4" label="Chave Pix" value={pixKey} onChange={e => setPixKey(e.target.value)} placeholder="CPF, CNPJ, e-mail, celular ou chave aleatória" />
+        footer={<Button full loading={busy} onClick={async () => { setBusy(true); setErr(null); try { await api('PUT', '/v1/finance/payout-account', bankMode ? { bank: { ...bank, account_digit: bank.account_digit.toUpperCase() } } : { pix_key: pixKey }, { otp: keyOtp }); setKeyOpen(false); load(); reloadMe(); } catch (e) { setErr(Object.values((e as ApiError).fields ?? {})[0] ?? (e as ApiError).title); } setBusy(false); }}>{bankMode ? 'Salvar conta' : 'Salvar chave'}</Button>}>
+        {bankMode ? <>
+          <p className="text-[14.5px] text-ink-soft">A conta precisa estar no mesmo CPF/CNPJ da sua identidade. Uma conta nova só recebe saques depois de 24 h.</p>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <Field label="Banco (código)" inputMode="numeric" value={bank.bank} onChange={e => setBank({ ...bank, bank: e.target.value.replace(/\D/g, '').slice(0, 3) })} placeholder="Ex.: 260" hint="3 números" />
+            <Field label="Agência" inputMode="numeric" value={bank.branch} onChange={e => setBank({ ...bank, branch: e.target.value.replace(/\D/g, '').slice(0, 4) })} hint="Sem o dígito" />
+            <Field label="Conta" inputMode="numeric" value={bank.account} onChange={e => setBank({ ...bank, account: e.target.value.replace(/\D/g, '').slice(0, 13) })} />
+            <Field label="Dígito" value={bank.account_digit} onChange={e => setBank({ ...bank, account_digit: e.target.value.replace(/[^0-9xX]/g, '').slice(0, 2) })} />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">{([['checking', 'Conta corrente'], ['savings', 'Poupança']] as const).map(([v, t]) => <button key={v} type="button" onClick={() => setBank({ ...bank, type: v })} className={`min-h-[44px] rounded-ctl border-2 px-3 text-left font-bold ${bank.type === v ? 'border-action bg-action-soft/40' : 'border-line'}`}>{t}</button>)}</div>
+        </> : <>
+          <p className="text-[14.5px] text-ink-soft">A chave precisa estar no mesmo CPF/CNPJ da sua conta. Uma chave nova só recebe saques depois de 24 h.</p>
+          <Field className="mt-4" label="Chave Pix" value={pixKey} onChange={e => setPixKey(e.target.value)} placeholder="CPF, CNPJ, e-mail, celular ou chave aleatória" />
+        </>}
         {me.user.totp_enabled ? <Field className="mt-3" label="Código do aplicativo autenticador" inputMode="numeric" value={keyOtp} onChange={e => setKeyOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} mono /> : <Banner tone="warn" className="mt-3" action={<Button size="sm" variant="secondary" onClick={() => { setKeyOpen(false); setupTotp(); }}>Ativar</Button>}>Ative a verificação em duas etapas primeiro.</Banner>}
         {err && <Banner tone="bad" className="mt-3">{err}</Banner>}
       </Modal>

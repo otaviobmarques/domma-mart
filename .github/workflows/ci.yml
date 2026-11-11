@@ -71,9 +71,30 @@ jobs:
           for i in $(seq 1 60); do curl -sf localhost:4000/health && break; sleep 1; done
           export PROD_TOTP=$(grep 'produtora@demo.com' seed.txt | sed -E 's/.*TOTP: ([A-Z2-7]+).*/\1/')
           node scripts/smoke.mjs
+      - name: Ponta a ponta com a Pagar.me (API falsa)
+        working-directory: apps/api
+        shell: bash
+        env:
+          GATEWAY_PROVIDER: pagarme
+          PAGARME_API_URL: http://127.0.0.1:4230/core/v5
+          PAGARME_SECRET_KEY: sk_test_e2e
+          PAGARME_PUBLIC_KEY: pk_test_e2e
+          PAGARME_PLATFORM_RECIPIENT_ID: rp_PLAT_E2E
+          PAGARME_WEBHOOK_USER: domma
+          PAGARME_WEBHOOK_PASSWORD: senha-do-webhook-de-teste
+          API_PORT: '4100'
+          PORT: '4100'
+        run: |
+          set -o pipefail
+          # a API do sandbox (passo anterior) divide a mesma fila no Redis: desliga antes
+          pkill -f "node dist/main.js" || true
+          sleep 1
+          node dist/main.js > api-pagarme.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:4100/health && break; sleep 1; done
+          API=http://localhost:4100 node scripts/pagarme.test.mjs
       - name: Log da API em caso de falha
         if: failure()
-        run: tail -200 apps/api/api.log || true
+        run: tail -200 apps/api/api.log apps/api/api-pagarme.log || true
       - name: Vulnerabilidades críticas
         run: npm audit --omit=dev --audit-level=critical
 

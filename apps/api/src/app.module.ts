@@ -10,6 +10,7 @@ import { NotifyService } from './infra/notify.service';
 import { AuthGuard } from './http/auth.guard';
 import { ProblemFilter } from './http/problem.filter';
 import { GATEWAY } from './modules/gateway/gateway.types';
+import { PagarmeGateway } from './modules/gateway/pagarme.adapter';
 import { SandboxGateway } from './modules/gateway/sandbox.adapter';
 import { LedgerService } from './modules/ledger/ledger.service';
 import { OrdersService } from './modules/orders/orders.service';
@@ -37,6 +38,7 @@ import { DomainsController } from './modules/domains/domains.controller';
 function gatewayFactory() {
   const p = process.env.GATEWAY_PROVIDER || 'sandbox';
   if (p === 'sandbox') return new SandboxGateway();
+  if (p === 'pagarme') return new PagarmeGateway();
   throw new Error(`Gateway "${p}" ainda não implementado — veja src/modules/gateway/README.md`);
 }
 

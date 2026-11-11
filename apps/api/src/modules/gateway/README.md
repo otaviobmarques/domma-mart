@@ -1,5 +1,7 @@
 # Adaptadores de gateway
 
+Implementados: `sandbox` (testes) e `pagarme` (Pagar.me API v5 — veja o README da raiz, seção *Gateway Pagar.me*).
+
 O sistema só conhece a interface `GatewayAdapter` (`gateway.types.ts`). Para ligar um gateway real
 (decisão D1 — Asaas, Pagar.me ou Mercado Pago):
 

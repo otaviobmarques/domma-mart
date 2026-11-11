@@ -39,11 +39,13 @@ export class JobsService implements OnApplicationBootstrap {
     q.register('subscriptions.charge', () => this.chargeSubscriptions());
     q.register('fees.tiers', () => this.recomputeTiers());
     q.register('reconcile.daily', () => this.reconcile());
+    q.register('transfers.poll', () => this.pollTransfers());
     q.startWorker();
     if (process.env.DISABLE_CRON !== '1') {
       await q.repeat('subscriptions.charge', '15 * * * *');
       await q.repeat('fees.tiers', '0 3 * * *'); // RN-05: diariamente às 03:00
       await q.repeat('reconcile.daily', '30 4 * * *');
+      if (this.gateway.getTransfer) await q.repeat('transfers.poll', '*/10 * * * *'); // gateways sem webhook de transferência
     }
   }
 
@@ -59,7 +61,7 @@ export class JobsService implements OnApplicationBootstrap {
         if (ev.type === 'charge.paid') {
           // RN-14: confirma também por consulta ativa antes de liberar
           const live = await this.gateway.getCharge(ev.chargeId);
-          if (live && live.status !== 'paid') throw new Error(`consulta ativa divergente: ${live.status}`);
+          if (!live || live.status !== 'paid') throw new Error(`consulta ativa divergente: ${live?.status ?? 'cobrança não encontrada no gateway'}`);
           await this.prisma.payments.update({ where: { id: pay.id }, data: { status: 'paid', raw_status: 'PAID' } });
           await this.orders.markPaid(pay.order_id, `webhook:${row.event_id}`);
         } else if (ev.type === 'charge.expired') await this.orders.markExpired(pay.order_id);
@@ -285,7 +287,7 @@ export class JobsService implements OnApplicationBootstrap {
     const charge = await this.gateway.createCharge({
       idempotencyKey: `sub:${s.id}:${s.current_period_end.getTime()}:${s.retry_count}`, orderId: s.id, method: 'card', amountCents: s.price_cents, installments: 1,
       description: offer.product.name, customer: { name: c.name, email: c.email, document: decrypt(c.document_enc), phone: decrypt(c.phone_enc) },
-      cardToken: s.card_token_ref ? `tok_sbx_${Buffer.from(JSON.stringify({ last4: s.card_last4, brand: s.card_brand, scenario: 'approve' })).toString('base64url')}` : undefined,
+      savedCardRef: s.card_token_ref ?? undefined,
       split: [],
     });
     if (charge.status === 'declined') {
@@ -330,6 +332,18 @@ export class JobsService implements OnApplicationBootstrap {
       const bps = tierBpsFor(r.s, ws?.custom_fee_bps);
       if (bps == null) { await this.prisma.fee_tiers_cache.deleteMany({ where: { workspace_id: r.workspace_id } }); continue; }
       await this.prisma.fee_tiers_cache.upsert({ where: { workspace_id: r.workspace_id }, create: { workspace_id: r.workspace_id, revenue_30d: r.s, fee_bps: bps, computed_at: new Date() }, update: { revenue_30d: r.s, fee_bps: bps, computed_at: new Date() } });
+    }
+  }
+
+  /** Consulta saques em andamento nos gateways que não avisam por webhook (ex.: Pagar.me). */
+  async pollTransfers() {
+    if (!this.gateway.getTransfer) return;
+    const pending = await this.prisma.withdrawals.findMany({ where: { status: 'processing', provider_transfer_id: { not: null } }, take: 200, orderBy: { created_at: 'asc' } });
+    for (const w of pending) {
+      try {
+        const t = await this.gateway.getTransfer(w.provider_transfer_id!);
+        if (t.status !== 'processing') await this.finance.onTransfer(w.provider_transfer_id!, t.status === 'paid', t.reason);
+      } catch (e) { this.log.warn(`transferência ${w.provider_transfer_id}: ${(e as Error).message}`); }
     }
   }
 

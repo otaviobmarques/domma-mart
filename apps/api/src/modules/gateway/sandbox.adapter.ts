@@ -18,9 +18,18 @@ import { brCode } from './brcode';
  */
 export class SandboxGateway implements GatewayAdapter {
   readonly name = 'sandbox';
+  readonly payoutMode = 'pix_key' as const;
+  readonly requiresSubaccountToSell = false;
+  publicConfig() { return { provider: 'sandbox', publicKey: null }; }
   private log = new Logger('SandboxGateway');
   private secret = process.env.GATEWAY_WEBHOOK_SECRET || 'sandbox_whsec_dev';
   private selfUrl = `http://127.0.0.1:${process.env.API_PORT || 4000}/webhooks/sandbox`;
+
+  async saveCard(i: { cardToken: string }) {
+    const tok = parseSandboxToken(i.cardToken);
+    if (!tok) throw new Error('token inválido');
+    return { tokenRef: sandboxRef(tok), brand: tok.brand, last4: tok.last4 };
+  }
 
   async createSubaccount(i: { workspaceId: string }) { return { id: `acc_sbx_${i.workspaceId.slice(0, 8)}${base62(6)}` }; }
 
@@ -43,7 +52,7 @@ export class SandboxGateway implements GatewayAdapter {
       result = { chargeId, status: 'pending', rawStatus: 'PENDING', boleto: { url: `/v1/dev/sandbox/boleto/${chargeId}.pdf`, line, dueAt: i.boletoDueAt! } };
       await this.save(chargeId, { status: 'pending', method: 'boleto', amount: String(i.amountCents), line });
     } else {
-      const tok = parseSandboxToken(i.cardToken);
+      const tok = parseSandboxToken(i.cardToken) ?? parseSandboxRef(i.savedCardRef);
       if (!tok) {
         result = { chargeId, status: 'declined', rawStatus: 'INVALID_TOKEN', declineCode: 'CARD_DECLINED' };
       } else {
@@ -52,7 +61,7 @@ export class SandboxGateway implements GatewayAdapter {
           expired: ['declined', 'CARD_EXPIRED', 10], cvv: ['declined', 'CARD_CVV_INVALID', 30], risk: ['declined', 'CARD_RISK_BLOCKED', 95],
         };
         const [status, declineCode, risk] = map[tok.scenario] ?? map.approve;
-        result = { chargeId, status, rawStatus: status.toUpperCase(), declineCode, riskScore: risk, card: { brand: tok.brand, last4: tok.last4, tokenRef: `card_sbx_${base62(10)}` } };
+        result = { chargeId, status, rawStatus: status.toUpperCase(), declineCode, riskScore: risk, card: { brand: tok.brand, last4: tok.last4, tokenRef: sandboxRef(tok) } };
         if (status === 'authorized') {
           await this.save(chargeId, { status: 'authorized', method: 'card', amount: String(i.amountCents) });
           // confirmação definitiva chega depois, por webhook (seção 8.2, passo 6)
@@ -75,10 +84,10 @@ export class SandboxGateway implements GatewayAdapter {
     return { refundId: `rf_sbx_${base62(10)}`, status: 'done' as const };
   }
 
-  async transfer(i: { pixKey: string; amountCents: bigint }) {
+  async transfer(i: { pixKey?: string; amountCents: bigint }) {
     const transferId = `tr_sbx_${base62(12)}`;
     // chave de teste "falha@teste.com" simula falha na transferência (seção 8.4, passo 4)
-    const fail = i.pixKey.toLowerCase().includes('falha');
+    const fail = (i.pixKey ?? '').toLowerCase().includes('falha');
     setTimeout(() => this.emit(fail ? { type: 'transfer.failed', transferId, reason: 'Chave Pix não encontrada' } : { type: 'transfer.paid', transferId }).catch(() => {}), 1500);
     return { transferId };
   }
@@ -115,4 +124,11 @@ export class SandboxGateway implements GatewayAdapter {
 export function parseSandboxToken(t?: string): { last4: string; brand: string; scenario: string } | null {
   if (!t?.startsWith('tok_sbx_')) return null;
   try { return JSON.parse(Buffer.from(t.slice(8), 'base64url').toString()); } catch { return null; }
+}
+
+/** Referência de cartão guardado no sandbox: carrega bandeira e final (o número completo nunca existe aqui). */
+export function sandboxRef(t: { last4: string; brand: string }) { return `card_sbx_${Buffer.from(JSON.stringify({ last4: t.last4, brand: t.brand })).toString('base64url')}`; }
+function parseSandboxRef(r?: string): { last4: string; brand: string; scenario: string } | null {
+  if (!r?.startsWith('card_sbx_')) return null;
+  try { return { ...JSON.parse(Buffer.from(r.slice(9), 'base64url').toString()), scenario: 'approve' }; } catch { return { last4: '0000', brand: 'card', scenario: 'approve' }; }
 }

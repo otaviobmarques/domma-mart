@@ -73,9 +73,32 @@ Para ligar, coloque na **API** (Railway): `VERCEL_TOKEN` (token com acesso ao pr
 
 Teste com API falsa do Vercel: `apps/api/scripts/domains.test.mjs`.
 
+## Gateway Pagar.me
+
+O adaptador da Pagar.me (API v5) está pronto; o ambiente de teste continua no *sandbox* até as chaves chegarem. Para ligar, na **API** (Railway):
+
+| Variável | O que é |
+|---|---|
+| `GATEWAY_PROVIDER` | `pagarme` |
+| `PAGARME_SECRET_KEY` | chave secreta (`sk_test_…` em teste, `sk_…` em produção) |
+| `PAGARME_PUBLIC_KEY` | chave pública (`pk_…`), usada no navegador para tokenizar o cartão |
+| `PAGARME_PLATFORM_RECIPIENT_ID` | recebedor principal da Domma (`rp_…`), que fica com a taxa e responde por chargeback |
+| `PAGARME_WEBHOOK_USER` / `PAGARME_WEBHOOK_PASSWORD` | usuário e senha (16+ caracteres) da autenticação básica do webhook |
+| `PAGARME_STATEMENT` | opcional: nome na fatura do cartão (até 13 letras, padrão `DOMMA`) |
+
+No **painel da Pagar.me**: cadastre o domínio do checkout (ex.: `domma-mart.vercel.app`) para a tokenização funcionar, e crie o webhook `https://<site>/webhooks/pagarme` com autenticação básica (o mesmo usuário e senha) para os eventos `charge.paid`, `charge.payment_failed`, `charge.refunded` e `chargeback.received`.
+
+Como funciona:
+- Cada produtor, afiliado e coprodutor vira um **recebedor** na Pagar.me assim que envia a identidade (com endereço, telefone e renda, exigidos pelo Banco Central) e cadastra a **conta bancária** de saque no próprio CPF/CNPJ. Sem recebedor, o checkout do produtor fica bloqueado com aviso no painel.
+- O **split** vai em cada cobrança em valores fixos; a plataforma fica com a taxa do gateway, o resto dos arredondamentos e a responsabilidade por chargeback.
+- O **saque** é uma transferência do recebedor para a conta bancária dele; o job `transfers.poll` consulta o estado a cada 10 minutos.
+- O **cartão** é tokenizado no navegador (`api.pagar.me/core/v5/tokens`); a API da Domma só vê o token.
+
+Testes: `apps/api/src/modules/gateway/pagarme.test.ts` (unitário) e `apps/api/scripts/pagarme.test.mjs` (ponta a ponta contra uma Pagar.me falsa, também no CI).
+
 ## Pendências antes de produção
 
-- **Gateway real** (decisão D1): hoje roda com o adaptador *sandbox*. Ver `apps/api/src/modules/gateway/README.md`.
+- **Gateway real**: chaves de teste da Pagar.me para validar o adaptador contra o ambiente deles antes de produção. Afiliados e coprodutores também precisam de identidade + conta bancária para receber a parte deles na Pagar.me.
 - **Vídeo**: o armazenamento é local com URLs assinadas; trocar por Bunny/Cloudflare Stream e R2/S3 (bucket KYC separado).
 - **Credenciais**: Resend (`RESEND_API_KEY`), Domma Chat (`DOMMA_CHAT_URL`/`TOKEN`), Cloudflare Turnstile (`TURNSTILE_SECRET`/`TURNSTILE_SITE_KEY`), KMS para as chaves de campo, cofre de segredos.
 - **Não implementado no MVP**: ajuste manual de ledger com aprovação de 2 pessoas (RN-38), consulta automática à Receita no KYC, antivírus de upload, emissão de nota fiscal, recursos da Fase 2/3.
