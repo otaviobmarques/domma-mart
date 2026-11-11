@@ -18,6 +18,8 @@ import { LedgerService } from './modules/ledger/ledger.service';
 import { OrdersService } from './modules/orders/orders.service';
 import { CheckoutService } from './modules/checkout/checkout.service';
 import { FunnelService } from './modules/checkout/funnel.service';
+import { RiskService } from './modules/risk/risk.service';
+import { RiskController } from './modules/risk/risk.controller';
 import { CheckoutController } from './modules/checkout/checkout.controller';
 import { WebhooksController, SandboxController } from './modules/webhooks/webhooks.controller';
 import { JobsService } from './modules/jobs/jobs.service';
@@ -47,13 +49,13 @@ function gatewayFactory() {
 
 @Module({
   imports: [EventEmitterModule.forRoot(), DiscoveryModule],
-  controllers: [
+  controllers: [RiskController, 
     HealthController, CheckoutController, WebhooksController, SandboxController, AuthController, CustomerController, OptOutController,
     ProductsController, MembersController, FilesController, DashboardController, KycController, AffiliatesController, SettingsController,
     AdminController, DevController, AdminOutboxController, DomainsController, AdjustmentsController, GoogleAuthController, PrivacyController,
   ],
   providers: [
-    PrismaService, AuditService, StorageService, QueueService, NotifyService, LedgerService, OrdersService, CheckoutService, FunnelService, JobsService, FinanceService, PrivacyService,
+    PrismaService, AuditService, StorageService, QueueService, NotifyService, LedgerService, OrdersService, CheckoutService, FunnelService, RiskService, JobsService, FinanceService, PrivacyService,
     { provide: GATEWAY, useFactory: gatewayFactory },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_FILTER, useClass: ProblemFilter },

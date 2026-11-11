@@ -360,5 +360,91 @@ console.log('\n12) Upsell e downsell com 1 clique na página de obrigado');
   await req('PUT', `/v1/offers/${mainOffer.id}/funnel`, { upsell_offer_id: null }, { cookie: 'prod' });
 }
 
+console.log('\n13) Antifraude: regras, revisão, bloqueios, reserva e chargeback do produtor');
+{
+  const A = { cookie: 'adm' };
+  const cpf = () => { const d = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)); for (const n of [9, 10]) { const s = d.reduce((a, x, i) => a + x * (n + 1 - i), 0); d.push((s * 10) % 11 % 10); } return d.join(''); };
+  const card = (extra = {}, headers = {}) => req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: { ...buyer(13), document: cpf() }, method: 'card', card_token: cardToken('4111111111111111'), ...extra }, { headers: { 'idempotency-key': randomUUID(), ...headers } });
+  const paid = async (o) => { const tk = new URL('http://x' + o.body.next.url).searchParams.get('t'); for (let i = 0; i < 20; i++) { await sleep(300); if ((await req('GET', `/v1/orders/${o.body.order_id}?t=${tk}`)).body.status === 'paid') return true; } return false; };
+  const blocked = async () => (await req('GET', '/v1/finance/balance', null, { cookie: 'prod' })).body.blocked_cents;
+  const cfg0 = (await req('GET', '/v1/admin/fraud/config', null, A)).body;
+  ok(cfg0.config.bands.review === 60 && !!cfg0.info.velocity_cpf, 'regras e faixas padrão no back-office');
+  const put = (c) => req('PUT', '/v1/admin/fraud/config', { ...c, reason: 'Teste automatizado do antifraude' }, A);
+  ok((await put({ ...cfg0.config, bands: { three_ds: 60, review: 50, decline: 85 } })).status === 422, 'faixas fora de ordem são recusadas');
+  ok((await put({ ...cfg0.config, bands: { three_ds: 5, review: 8, decline: 200 } })).status === 200, 'Risco ajusta as faixas (com motivo na auditoria)');
+
+  // revisão: compra aprovada pelo banco, dinheiro do produtor em análise
+  const held0 = await blocked();
+  const r1 = await card();
+  ok(r1.status === 201 && await paid(r1), 'compra na faixa de revisão é aprovada e liberada ao comprador');
+  const q = (await req('GET', '/v1/admin/fraud/reviews', null, A)).body;
+  const rv = q.find(x => x.order?.id === r1.body.order_id);
+  ok(rv && rv.signals.some(x => x.rule === 'no_device') && rv.buyer.email.includes('***'), 'pedido entra na fila de revisão com os motivos e e-mail mascarado');
+  const held1 = await blocked();
+  ok(held1 > held0, `valor do produtor fica "Em análise" (${held0} → ${held1})`);
+  ok((await req('POST', `/v1/admin/fraud/reviews/${rv.id}/approve`, { reason: 'curto' }, A)).status === 422, 'decisão exige motivo');
+  ok((await req('POST', `/v1/admin/fraud/reviews/${rv.id}/approve`, { reason: 'Comprador conhecido, confirmado por telefone' }, A)).status === 200, 'Risco aprova a compra');
+  ok(await blocked() === held0, 'aprovada: o valor volta ao saldo do produtor');
+  ok((await req('POST', `/v1/admin/fraud/reviews/${rv.id}/approve`, { reason: 'Comprador conhecido, confirmado por telefone' }, A)).status === 409, 'revisão já decidida não pode ser decidida de novo');
+
+  // recusar: reembolsa e bloqueia o CPF
+  const doc = cpf();
+  const r2 = await card({ customer: { ...buyer(14), document: doc } });
+  await paid(r2);
+  const rv2 = (await req('GET', '/v1/admin/fraud/reviews', null, A)).body.find(x => x.order?.id === r2.body.order_id);
+  const rej = await req('POST', `/v1/admin/fraud/reviews/${rv2.id}/reject`, { reason: 'Cartão de terceiro, titular não reconhece', block: ['cpf'] }, A);
+  ok(rej.status === 200 && rej.body.refunded === true, 'Risco recusa: a compra é reembolsada');
+  let st2; for (let i = 0; i < 20; i++) { await sleep(300); st2 = (await req('GET', `/v1/orders/${r2.body.order_id}/detail`, null, { cookie: 'prod' })).body.status; if (st2 === 'refunded') break; }
+  ok(st2 === 'refunded' && await blocked() === held0, 'reembolso concluído e nada fica preso "Em análise"');
+  const again = await card({ customer: { ...buyer(15), document: doc } });
+  ok(again.status === 402 && again.body.code === 'CARD_RISK_BLOCKED', 'CPF bloqueado não compra de novo');
+
+  // faixa de recusa: não cria pedido, sugere Pix
+  await put({ ...cfg0.config, bands: { three_ds: 5, review: 8, decline: 9 } });
+  const r3 = await card();
+  ok(r3.status === 402 && r3.body.code === 'CARD_RISK_BLOCKED' && /Pix/.test(r3.body.title), 'pontuação de recusa: cartão recusado, sugere Pix');
+  const as = (await req('GET', '/v1/admin/fraud/assessments?decision=decline', null, A)).body;
+  ok(as.some(x => !x.has_order), 'recusa fica registrada nas avaliações (sem pedido)');
+
+  // BIN bloqueado, com padrões de volta
+  await put(cfg0.defaults);
+  ok((await req('POST', '/v1/admin/blocklist', { kind: 'bin', value: '411111', reason: 'BIN usado em teste de cartão' }, A)).status === 201, 'BIN entra na lista de bloqueio');
+  const r4 = await card({ card_bin: '411111', device_fingerprint: randomUUID().replace(/-/g, '') });
+  ok(r4.status === 402 && r4.body.code === 'CARD_RISK_BLOCKED', 'cartão com BIN bloqueado é recusado');
+  const bl = (await req('GET', '/v1/admin/blocklist?kind=bin', null, A)).body.find(x => x.label === 'BIN 411111');
+  ok((await req('DELETE', `/v1/admin/blocklist/${bl.id}`, { reason: 'Fim do ataque, BIN liberado' }, A)).status === 200, 'bloqueio removido com motivo');
+
+  // IP fora do Brasil entra na pontuação
+  await card({ device_fingerprint: randomUUID().replace(/-/g, '') }, { 'x-domma-client-country': 'US' });
+  const last = (await req('GET', '/v1/admin/fraud/assessments', null, A)).body[0];
+  ok(last.signals.some(x => x.rule === 'foreign_ip'), 'IP fora do Brasil soma pontos');
+
+  // reserva automática para conta nova (20% por 45 dias)
+  ok((await put({ ...cfg0.defaults, reserve: { new_account_pct: 20, new_account_days: 45, account_age_days: 30, min_paid_orders: 10000 } })).status === 200, 'Risco liga a reserva para contas novas');
+  const px = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: { ...buyer(16), document: cpf() }, method: 'pix' }, { headers: { 'idempotency-key': randomUUID() } });
+  await req('POST', `/v1/dev/sandbox/orders/${px.body.order_id}/pay`, { t: new URL('http://x' + px.body.next.url).searchParams.get('t') });
+  await sleep(1500);
+  const inc = (await req('GET', '/v1/finance/balance', null, { cookie: 'prod' })).body.incoming_by_date;
+  ok(inc.some(x => new Date(x.day).getTime() > Date.now() + 43 * 86400000), 'reserva: parte da venda fica "Chegando" por 45 dias');
+  await put(cfg0.defaults);
+
+  // chargeback do produtor acima do limite → saques pausados
+  await put({ ...cfg0.defaults, producer: { alert_pct: 0.1, review_pct: 0.2, pause_pct: 0.3, min_orders: 1 } });
+  ok((await req('POST', `/v1/admin/orders/${c1.body.order_id}/chargeback`, { stage: 'opened', reason: 'Simulação de contestação no teste' }, A)).status === 200, 'contestação registrada');
+  await sleep(1500);
+  const scan = (await req('POST', '/v1/admin/fraud/scan-producers', null, A)).body;
+  ok(scan.paused >= 1, 'verificação diária pausa os saques de quem passou do limite');
+  const al = (await req('GET', '/v1/admin/fraud/alerts', null, A)).body;
+  ok(al.some(a => a.kind === 'producer_chargeback' && a.level === 'high'), 'alerta de chargeback alto para a equipe de Risco');
+  if (secret) {
+    const wd = await req('POST', '/v1/finance/withdrawals', { amount_cents: 1000 }, { cookie: 'prod', headers: { 'idempotency-key': randomUUID(), 'x-otp': totp(secret) } });
+    ok(wd.status === 423 && wd.body.code === 'PAYOUTS_PAUSED', 'produtor com saques pausados não saca (vendas continuam)');
+  }
+  ok((await req('GET', '/v1/finance/balance', null, { cookie: 'prod' })).body.payouts_paused === true, 'painel do produtor mostra a pausa');
+  const wsId = (await req('GET', '/v1/admin/risk', null, A)).body.find(r => r.paused)?.workspace_id;
+  ok((await req('POST', `/v1/admin/accounts/${wsId}/payouts`, { paused: false, reason: 'Contestação analisada, conta liberada' }, A)).status === 200, 'Risco libera os saques');
+  await put(cfg0.defaults);
+}
+
 console.log(`\n${pass} ok, ${fail} falhas\n`);
 process.exit(fail ? 1 : 0);

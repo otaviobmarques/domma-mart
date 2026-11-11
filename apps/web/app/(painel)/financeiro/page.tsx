@@ -64,7 +64,8 @@ export default function Financeiro() {
             <p className="mt-2 text-[14px] text-ink-mute">{bankMode ? 'Saque para sua conta bancária. Cai em até 1 dia útil.' : 'Saque grátis por Pix. Cai na sua conta em minutos.'}</p>
           </>}
           <div className="mt-4">
-            {b.kyc_status !== 'approved' ? <><Button size="lg" disabled>Sacar para minha conta</Button><p className="mt-2 text-[14px] text-ink-mute">Confirme sua identidade para sacar. <a href="/identidade" className="font-semibold text-action">Confirmar agora</a></p></>
+            {b.payouts_paused ? <><Button size="lg" disabled>Sacar para minha conta</Button><p className="mt-2 text-[14px] text-bad">Saques pausados para uma análise de segurança. Suas vendas continuam normalmente. Fale com o suporte.</p></>
+              : b.kyc_status !== 'approved' ? <><Button size="lg" disabled>Sacar para minha conta</Button><p className="mt-2 text-[14px] text-ink-mute">Confirme sua identidade para sacar. <a href="/identidade" className="font-semibold text-action">Confirmar agora</a></p></>
               : !b.payout_account ? <Button size="lg" onClick={() => setKeyOpen(true)}>{bankMode ? 'Cadastrar conta bancária' : 'Cadastrar chave Pix'}</Button>
               : <Button size="lg" disabled={b.available_cents < 1000} onClick={startWithdraw}>Sacar para minha conta</Button>}
           </div>
@@ -72,7 +73,7 @@ export default function Financeiro() {
         </Card>
         <div className="space-y-4">
           <Card><p className="text-[14px] font-semibold text-ink-mute">Chegando</p><p className="num mt-1 text-[22px] font-bold">{brl(b.incoming_cents)}</p><button className="mt-1 text-[14px] font-semibold text-action" onClick={() => setDates(true)}>Ver datas</button></Card>
-          <Card><p className="text-[14px] font-semibold text-ink-mute">Em análise</p><p className="num mt-1 text-[22px] font-bold">{brl(b.blocked_cents)}</p><p className="text-[13px] text-ink-mute">{b.blocked_count} {b.blocked_count === 1 ? 'contestação' : 'contestações'}</p></Card>
+          <Card><p className="text-[14px] font-semibold text-ink-mute">Em análise</p><p className="num mt-1 text-[22px] font-bold">{brl(b.blocked_cents)}</p><p className="text-[13px] text-ink-mute">{b.blocked_count} {b.blocked_count === 1 ? 'venda em análise' : 'vendas em análise'} (contestação ou segurança)</p></Card>
         </div>
       </div>
 

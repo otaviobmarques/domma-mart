@@ -13,6 +13,8 @@ import { QueueService } from '../../infra/queue.service';
 import { NotifyService } from '../../infra/notify.service';
 import { urls } from '../../common/urls';
 import { formatBRL } from '../../domain/money';
+import { RiskService, CardAttempt } from '../risk/risk.service';
+import { LedgerService } from '../ledger/ledger.service';
 
 export interface CreateOrderBody {
   customer?: { name: string; email: string; phone: string; document: string };
@@ -30,6 +32,8 @@ export interface CreateOrderBody {
   tracking?: Record<string, string>;
   affiliate_code?: string;
   device_fingerprint?: string;
+  /** 6 primeiros números do cartão (BIN), para o antifraude. Não é dado sensível do cartão (PCI). */
+  card_bin?: string;
 }
 
 @Injectable()
@@ -40,6 +44,8 @@ export class CheckoutService {
     @Inject(GATEWAY) private gateway: GatewayAdapter,
     private queue: QueueService,
     private notify: NotifyService,
+    private risk: RiskService,
+    private ledger: LedgerService,
   ) {}
 
   /** Oferta disponível para venda? (estados da tela 19.1) */
@@ -119,7 +125,7 @@ export class CheckoutService {
   }
 
   /** POST /v1/checkout/{offerId}/orders — seção 8.2/8.3 e contrato 22.1. */
-  async createOrder(offerId: string, body: CreateOrderBody, meta: { ip: string; ua: string; idempotencyKey: string; affiliateCookie?: string; host?: string }) {
+  async createOrder(offerId: string, body: CreateOrderBody, meta: { ip: string; ua: string; idempotencyKey: string; affiliateCookie?: string; host?: string; country?: string }) {
     // RN-30: mesma chave devolve o mesmo resultado sem nova cobrança
     const prior = await this.prisma.orders.findUnique({ where: { idempotency_key: meta.idempotencyKey }, include: { payments: { orderBy: { created_at: 'desc' }, take: 1 } } });
     if (prior) return this.responseFor(prior, prior.payments[0]);
@@ -200,6 +206,19 @@ export class CheckoutService {
     if (n > allowed) n = allowed;
     const plan = installmentPlan(base, n, offer.installment_interest);
 
+    // Antifraude (RN-60): regras + pontuação; recusa aqui, antes de criar pedido e cobrança
+    let attempt: CardAttempt | null = null, risk: Awaited<ReturnType<RiskService['assessCard']>> | null = null;
+    const threeDSOk = !!body.three_ds && ['Y', 'A'].includes(body.three_ds.status);
+    if (body.method === 'card') {
+      attempt = { workspaceId: ws.id, offerId: offer.id, amountCents: plan.totalCents, docHash, email, ipHash, device: body.device_fingerprint, bin: savedCard ? undefined : body.card_bin, ipCountry: meta.country, threeDSOk };
+      risk = await this.risk.assessCard(attempt);
+      if (risk.decision === 'decline') {
+        await this.risk.record(attempt, risk);
+        await this.onCardDeclined(offer.id, docHash, ipHash);
+        throw new AppError('CARD_RISK_BLOCKED', { title: 'Não conseguimos aprovar este pagamento no cartão. Tente pagar com Pix.' });
+      }
+    }
+
     // Afiliado (RN-70/71)
     const affiliation = await this.resolveAffiliate(offer.product_id, body.affiliate_code || meta.affiliateCookie, { docHash, email, ipHash, fingerprint: body.device_fingerprint });
 
@@ -247,6 +266,8 @@ export class CheckoutService {
       return o;
     });
 
+    const assessment = attempt && risk ? await this.risk.record(attempt, risk, order.id) : null;
+
     // Cobrança no gateway com split (subcontas)
     const subaccounts = await this.prisma.workspaces.findMany({ where: { id: { in: split.map(s => s.beneficiary_id).filter(Boolean) as string[] } }, select: { id: true, gateway_subaccount_id: true } });
     let charge;
@@ -280,6 +301,17 @@ export class CheckoutService {
       await tx.order_events.create({ data: { order_id: order.id, from_status: 'created', to_status: nextStatus, event: charge.status === 'declined' ? 'payment.declined' : 'payment.created', data: { decline_code: charge.declineCode } } });
     });
 
+    // pontuação do gateway entra na conta; se a compra cair em revisão, o dinheiro do produtor fica "Em análise".
+    // A trava (mesma do markPaid) garante a retenção mesmo se o webhook de pagamento chegar antes daqui.
+    if (assessment && charge.status !== 'declined') {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'hold:' + order.id}))`;
+        await this.risk.afterCharge(tx, assessment.id, charge.riskScore, threeDSOk);
+        const open = await tx.risk_assessments.count({ where: { id: assessment.id, review_status: 'open' } });
+        const paid = await tx.orders.count({ where: { id: order.id, paid_at: { not: null } } });
+        if (open && paid) await this.ledger.holdOrder(tx, order.id, order.code);
+      });
+    }
     if (body.method === 'card' && charge.status !== 'declined') {
       if (savedCard) await this.prisma.saved_cards.update({ where: { id: savedCard.id }, data: { last_used_at: new Date() } });
       else if (body.save_card && charge.card?.tokenRef) await this.saveCard(customer.id, charge.card.tokenRef, charge.card.brand, charge.card.last4).catch(e => this.log.warn(`cartão não guardado: ${(e as Error).message}`));
@@ -362,7 +394,11 @@ export class CheckoutService {
 
   /** RN-61: mais de 20 recusas em 10 min numa oferta pausa o cartão por 30 min. RN-16: 5 recusas/h por CPF/IP. */
   private async onCardDeclined(offerId: string, docHash: string, ipHash: string) {
-    if ((await rl.hit(`decl:offer:${offerId}`, 600)) > 20) { await rl.block(`card:offer:${offerId}`, 1800); this.log.warn(`teste de cartão na oferta ${offerId} — cartão pausado por 30 min`); }
+    if ((await rl.hit(`decl:offer:${offerId}`, 600)) > 20 && !(await rl.isBlocked(`card:offer:${offerId}`))) {
+      await rl.block(`card:offer:${offerId}`, 1800);
+      const o = await this.prisma.offers.findUnique({ where: { id: offerId }, include: { product: true } });
+      await this.risk.alert({ kind: 'card_testing', level: 'high', offerId, workspaceId: o?.workspace_id, message: `Teste de cartão em “${o?.product.name ?? offerId}”: mais de 20 recusas em 10 min. Cartão pausado nesta oferta por 30 min.`, dedupe: `card_testing:${offerId}:${Math.floor(Date.now() / 1_800_000)}` });
+    }
     for (const k of [`cpf:${docHash}`, `ip:${ipHash}`]) if ((await rl.hit(`decl:${k}`, 3600)) >= 5) await rl.block(`card:${k}`, 3600);
   }
 

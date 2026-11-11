@@ -100,7 +100,11 @@ model workspaces {
   gateway_subaccount_id    String?
   custom_fee_bps           Int? // taxa negociada (RN-05), em pontos-base
   daily_withdraw_limit     BigInt      @default(5000000)
-  reserve_pct              Int         @default(0) // reserva de segurança (rolling reserve)
+  reserve_pct              Int         @default(0) // reserva de segurança (rolling reserve), em % do que o produtor recebe
+  reserve_days             Int         @default(30) // por quantos dias a reserva fica retida
+  /// pausa cautelar de saques (RN-55: chargeback alto) — vendas continuam, saque não
+  payouts_paused_at        DateTime?   @db.Timestamptz
+  payouts_paused_reason    String?
   blocked_at               DateTime?   @db.Timestamptz
   blocked_reason           String?
   support_whatsapp         String?
@@ -855,8 +859,10 @@ model idempotency_keys {
 
 model blocklist {
   id         String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
-  kind       String // cpf | email | email_domain | card | ip | bin
+  kind       String // cpf | email | email_domain | ip | bin | device
   value_hash String
+  /// valor mascarado para a equipe reconhecer o bloqueio (nunca o valor completo)
+  label      String?
   reason     String
   expires_at DateTime? @db.Timestamptz
   created_by String?  @db.Uuid
@@ -931,4 +937,55 @@ model ledger_adjustments {
 
   @@index([status, created_at])
   @@index([workspace_id])
+}
+
+/// Antifraude (Fase 2): faixas, regras e reserva automática, editáveis no back-office
+model risk_config {
+  key        String   @id
+  value      Json
+  updated_by String?  @db.Uuid
+  updated_at DateTime @default(now()) @db.Timestamptz
+}
+
+/// Avaliação de risco de cada tentativa de compra no cartão (aprovada, revisão ou recusada)
+model risk_assessments {
+  id            String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  order_id      String?   @unique @db.Uuid
+  workspace_id  String    @db.Uuid
+  offer_id      String    @db.Uuid
+  method        String
+  amount_cents  BigInt
+  score         Int
+  gateway_score Int?
+  decision      String // approve | three_ds | review | decline
+  signals       Json // [{ rule, points, detail }]
+  doc_hash      String?
+  email_hash    String?
+  ip_hash       String?
+  device        String?
+  review_status String? // open | approved | rejected (só para decision=review)
+  reviewed_by   String?   @db.Uuid
+  reviewed_at   DateTime? @db.Timestamptz
+  review_reason String?
+  created_at    DateTime  @default(now()) @db.Timestamptz
+
+  @@index([review_status, created_at])
+  @@index([created_at])
+}
+
+/// Alertas para a equipe de Risco: teste de cartão, chargeback alto do produtor, picos
+model risk_alerts {
+  id              String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  kind            String // card_testing | producer_chargeback | review_backlog
+  level           String // info | warn | high
+  workspace_id    String?   @db.Uuid
+  offer_id        String?   @db.Uuid
+  message         String
+  data            Json?
+  dedupe_key      String?   @unique
+  acknowledged_by String?   @db.Uuid
+  acknowledged_at DateTime? @db.Timestamptz
+  created_at      DateTime  @default(now()) @db.Timestamptz
+
+  @@index([acknowledged_at, created_at])
 }

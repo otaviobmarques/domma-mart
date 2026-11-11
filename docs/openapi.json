@@ -248,6 +248,63 @@
         }
       }
     },
+    "/v1/admin/accounts/{id}/payouts": {
+      "post": {
+        "operationId": "Risk_payouts",
+        "tags": [
+          "admin"
+        ],
+        "summary": "payouts",
+        "description": "Acesso: admin (permissão risk.manage). Exige o cabeçalho X-Requested-With: domma (CSRF).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/adjustments": {
       "get": {
         "operationId": "Adjustments_list",
@@ -542,8 +599,44 @@
       }
     },
     "/v1/admin/blocklist": {
+      "get": {
+        "operationId": "Risk_blocklist",
+        "tags": [
+          "admin"
+        ],
+        "summary": "blocklist",
+        "description": "Acesso: admin (permissão risk.manage).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
-        "operationId": "Admin_addBlock",
+        "operationId": "Risk_addBlock",
         "tags": [
           "admin"
         ],
@@ -589,6 +682,53 @@
         }
       }
     },
+    "/v1/admin/blocklist/{id}": {
+      "delete": {
+        "operationId": "Risk_removeBlock",
+        "tags": [
+          "admin"
+        ],
+        "summary": "remove block",
+        "description": "Acesso: admin (permissão risk.manage). Exige o cabeçalho X-Requested-With: domma (CSRF).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/disputes": {
       "get": {
         "operationId": "Admin_disputes",
@@ -603,6 +743,461 @@
           }
         ],
         "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/fraud/alerts": {
+      "get": {
+        "operationId": "Risk_alerts",
+        "tags": [
+          "admin"
+        ],
+        "summary": "alerts",
+        "description": "Acesso: admin (permissão risk.manage).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/fraud/alerts/{id}/ack": {
+      "post": {
+        "operationId": "Risk_ack",
+        "tags": [
+          "admin"
+        ],
+        "summary": "ack",
+        "description": "Acesso: admin (permissão risk.manage). Exige o cabeçalho X-Requested-With: domma (CSRF).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/fraud/assessments": {
+      "get": {
+        "operationId": "Risk_assessments",
+        "tags": [
+          "admin"
+        ],
+        "summary": "assessments",
+        "description": "Acesso: admin (permissão risk.manage).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/fraud/config": {
+      "get": {
+        "operationId": "Risk_getConfig",
+        "tags": [
+          "admin"
+        ],
+        "summary": "get config",
+        "description": "Acesso: admin (permissão risk.manage).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "Risk_putConfig",
+        "tags": [
+          "admin"
+        ],
+        "summary": "put config",
+        "description": "Acesso: admin (permissão risk.manage). Exige o cabeçalho X-Requested-With: domma (CSRF).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/fraud/overview": {
+      "get": {
+        "operationId": "Risk_overview",
+        "tags": [
+          "admin"
+        ],
+        "summary": "overview",
+        "description": "Acesso: admin (permissão risk.manage).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/fraud/reviews": {
+      "get": {
+        "operationId": "Risk_reviews",
+        "tags": [
+          "admin"
+        ],
+        "summary": "reviews",
+        "description": "Acesso: admin (permissão risk.manage).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/fraud/reviews/{id}/approve": {
+      "post": {
+        "operationId": "Risk_approve",
+        "tags": [
+          "admin"
+        ],
+        "summary": "approve",
+        "description": "Acesso: admin (permissão risk.manage). Exige o cabeçalho X-Requested-With: domma (CSRF).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/fraud/reviews/{id}/reject": {
+      "post": {
+        "operationId": "Risk_reject",
+        "tags": [
+          "admin"
+        ],
+        "summary": "reject",
+        "description": "Acesso: admin (permissão risk.manage). Exige o cabeçalho X-Requested-With: domma (CSRF).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/fraud/scan-producers": {
+      "post": {
+        "operationId": "Risk_scan",
+        "tags": [
+          "admin"
+        ],
+        "summary": "scan",
+        "description": "Acesso: admin (permissão risk.manage). Exige o cabeçalho X-Requested-With: domma (CSRF).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -1293,11 +1888,11 @@
     },
     "/v1/admin/risk": {
       "get": {
-        "operationId": "Admin_risk",
+        "operationId": "Risk_producers",
         "tags": [
           "admin"
         ],
-        "summary": "risk",
+        "summary": "producers",
         "description": "Acesso: admin (permissão risk.manage).",
         "security": [
           {
@@ -7099,11 +7694,13 @@
               "PAYOUT_DESTINATION_COOLDOWN",
               "PAYOUT_ACCOUNT_REQUIRED",
               "ACCOUNT_BLOCKED",
+              "PAYOUTS_PAUSED",
               "PERMISSION_DENIED",
               "NOT_FOUND",
               "UPLOAD_TOO_LARGE",
               "IDEMPOTENCY_KEY_REQUIRED",
               "IDEMPOTENCY_CONFLICT",
+              "CONFLICT",
               "EMAIL_TAKEN",
               "WEAK_PASSWORD",
               "PWNED_PASSWORD",

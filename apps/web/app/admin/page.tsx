@@ -3,12 +3,13 @@ import { useEffect, useState } from 'react';
 import { get, post, api, ApiError } from '@/lib/api';
 import { brl, dateTime, shortDate, ago, maskMoney, moneyToCents } from '@/lib/format';
 import { Button, Card, Field, Textarea, Select, Skeleton, Banner, Pill, StatusBadge, Modal, cx } from '@/components/ui';
+import { Antifraude } from '@/components/admin-fraud';
 
 export default function Admin() {
   const [v, setV] = useState<string | null>(null);
   useEffect(() => setV(new URLSearchParams(location.search).get('v') ?? ''), []);
   if (v === null) return null;
-  return ({ kyc: <Kyc />, moderacao: <Moderacao />, disputas: <Disputas />, risco: <Risco />, contas: <Contas />, pedidos: <Pedidos />, conciliacao: <Conciliacao />, ajustes: <Ajustes />, privacidade: <Privacidade />, auditoria: <Auditoria /> } as Record<string, React.ReactNode>)[v] ?? <Overview />;
+  return ({ kyc: <Kyc />, moderacao: <Moderacao />, disputas: <Disputas />, risco: <Antifraude />, contas: <Contas />, pedidos: <Pedidos />, conciliacao: <Conciliacao />, ajustes: <Ajustes />, privacidade: <Privacidade />, auditoria: <Auditoria /> } as Record<string, React.ReactNode>)[v] ?? <Overview />;
 }
 
 function H({ children }: { children: React.ReactNode }) { return <h1 className="mb-4 text-[24px] font-extrabold">{children}</h1>; }
@@ -19,7 +20,7 @@ function Overview() {
   if (!o) return <Skeleton className="h-40 w-full" />;
   return (<><H>Visão geral</H>
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      {[['KYC pendentes', o.pending.kyc, '/admin?v=kyc'], ['Produtos em análise', o.pending.moderation, '/admin?v=moderacao'], ['Contestações abertas', o.pending.disputes, '/admin?v=disputas'], ['Webhooks parados', o.pending.failed_webhooks, null]].map(([l, n, h]) => <a key={l as string} href={(h as string) ?? '#'}><Card><p className="text-[13.5px] font-semibold text-ink-mute">{l}</p><p className={cx('num mt-1 text-[28px] font-bold', Number(n) > 0 && l === 'Webhooks parados' && 'text-bad')}>{n}</p></Card></a>)}
+      {[['KYC pendentes', o.pending.kyc, '/admin?v=kyc'], ['Produtos em análise', o.pending.moderation, '/admin?v=moderacao'], ['Contestações abertas', o.pending.disputes, '/admin?v=disputas'], ['Webhooks parados', o.pending.failed_webhooks, null], ['Antifraude: revisões e alertas', (o.pending.fraud_reviews ?? 0) + (o.pending.risk_alerts ?? 0), '/admin?v=risco']].map(([l, n, h]) => <a key={l as string} href={(h as string) ?? '#'}><Card><p className="text-[13.5px] font-semibold text-ink-mute">{l}</p><p className={cx('num mt-1 text-[28px] font-bold', Number(n) > 0 && l === 'Webhooks parados' && 'text-bad')}>{n}</p></Card></a>)}
       <Card><p className="text-[13.5px] font-semibold text-ink-mute">Contas</p><p className="num mt-1 text-[28px] font-bold">{o.accounts}</p></Card>
       <Card><p className="text-[13.5px] font-semibold text-ink-mute">GMV 30 dias</p><p className="num mt-1 text-[22px] font-bold">{brl(o.gmv_30d_cents)}</p><p className="text-[13px] text-ink-mute">{o.orders_30d} pedidos</p></Card>
       <Card><p className="text-[13.5px] font-semibold text-ink-mute">Receita da plataforma</p><p className="num mt-1 text-[22px] font-bold">{brl(o.platform_revenue_cents)}</p></Card>
@@ -100,30 +101,18 @@ function Disputas() {
   </>);
 }
 
-function Risco() {
-  const [rows, setRows] = useState<any[] | null>(null);
-  const [b, setB] = useState({ kind: 'cpf', value: '', reason: '' });
-  const [msg, setMsg] = useState<string | null>(null);
-  useEffect(() => { get('/v1/admin/risk').then(setRows); }, []);
-  return (<><H>Alertas de risco</H>
-    <Card className="p-0">{!rows ? <Skeleton className="m-5 h-24" /> : <table className="w-full text-left text-[14px]"><thead className="border-b border-line bg-canvas/60 text-[12.5px] text-ink-mute"><tr><th className="px-5 py-2">Conta</th><th className="text-right">Pagos (30d)</th><th className="text-right">Chargeback</th><th className="text-right">Reembolso</th><th className="px-5">Nível</th></tr></thead>
-      <tbody className="divide-y divide-line">{rows.map(r => <tr key={r.workspace_id}><td className="px-5 py-2.5 font-semibold">{r.name}</td><td className="num text-right">{r.paid}</td><td className="num text-right">{r.chargeback_pct}%</td><td className="num text-right">{r.refund_pct}%</td><td className="px-5"><Pill tone={r.level === 'ok' ? 'ok' : r.level === 'alerta' ? 'warn' : 'bad'}>{r.level}</Pill></td></tr>)}</tbody></table>}</Card>
-    <Card className="mt-4 max-w-xl space-y-3"><h2 className="font-extrabold">Lista de bloqueio</h2>{msg && <Banner tone="ok">{msg}</Banner>}
-      <Select label="Tipo" value={b.kind} onChange={e => setB({ ...b, kind: e.target.value })}><option value="cpf">CPF</option><option value="email">E-mail</option><option value="email_domain">Domínio de e-mail</option><option value="ip">IP</option></Select>
-      <Field label="Valor" value={b.value} onChange={e => setB({ ...b, value: e.target.value })} /><Field label="Motivo" value={b.reason} onChange={e => setB({ ...b, reason: e.target.value })} />
-      <Button onClick={async () => { try { await post('/v1/admin/blocklist', b); setMsg('Bloqueio adicionado.'); setB({ ...b, value: '', reason: '' }); } catch (e) { setMsg(Object.values((e as ApiError).fields ?? {})[0] ?? (e as ApiError).title); } }}>Bloquear</Button></Card></>);
-}
-
 function Contas() {
   const [q, setQ] = useState(''); const [rows, setRows] = useState<any[] | null>(null); const [edit, setEdit] = useState<any>(null); const [msg, setMsg] = useState<string | null>(null);
   const load = () => get(`/v1/admin/accounts?q=${encodeURIComponent(q)}`).then(setRows);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [q]);
   return (<><H>Contas</H><Field label="Buscar" value={q} onChange={e => setQ(e.target.value)} placeholder="Nome ou e-mail" className="mb-4 max-w-md" />{msg && <Banner tone="bad" className="mb-3">{msg}</Banner>}
     <Card className="p-0">{!rows ? <Skeleton className="m-5 h-24" /> : <ul className="divide-y divide-line">{rows.map(w => (
-      <li key={w.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3"><span><span className="font-semibold">{w.name}</span> <span className="text-[13px] text-ink-mute">{w.owner_email}</span> <Pill tone={w.kyc_status === 'approved' ? 'ok' : 'warn'}>{w.kyc_status}</Pill> {w.blocked && <Pill tone="bad">Bloqueada</Pill>} {w.custom_fee_bps != null && <Pill tone="action">Taxa {w.custom_fee_bps / 100}%</Pill>}</span>
-        <Button size="sm" variant="secondary" onClick={() => setEdit({ ...w, reason: '', fee: w.custom_fee_bps != null ? String(w.custom_fee_bps / 100) : '', limit: String(w.daily_withdraw_limit / 100) })}>Gerir</Button></li>))}</ul>}</Card>
-    <Modal open={!!edit} onClose={() => setEdit(null)} title={edit?.name ?? ''} footer={<><Button variant={edit?.blocked ? 'ok' : 'danger'} onClick={async () => { try { await post(`/v1/admin/accounts/${edit.id}/block`, { blocked: !edit.blocked, reason: edit.reason }); setEdit(null); load(); } catch (e) { setMsg(Object.values((e as ApiError).fields ?? {})[0] ?? (e as ApiError).title); setEdit(null); } }}>{edit?.blocked ? 'Desbloquear' : 'Bloquear conta'}</Button><Button onClick={async () => { try { await api('PATCH', `/v1/admin/accounts/${edit.id}/limits`, { custom_fee_bps: edit.fee ? Math.round(Number(edit.fee.replace(',', '.')) * 100) : null, daily_withdraw_limit: Math.round(Number(edit.limit) * 100), reason: edit.reason }); setEdit(null); load(); } catch (e) { setMsg(Object.values((e as ApiError).fields ?? {})[0] ?? (e as ApiError).title); setEdit(null); } }}>Salvar limites</Button></>}>
-      {edit && <div className="space-y-3"><Field label="Taxa negociada (%) — vazio = padrão" value={edit.fee} onChange={e => setEdit({ ...edit, fee: e.target.value })} /><Field label="Limite diário de saque (R$)" value={edit.limit} onChange={e => setEdit({ ...edit, limit: e.target.value })} /><Textarea label="Motivo (obrigatório, vai para a auditoria)" value={edit.reason} onChange={e => setEdit({ ...edit, reason: e.target.value })} /></div>}
+      <li key={w.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3"><span><span className="font-semibold">{w.name}</span> <span className="text-[13px] text-ink-mute">{w.owner_email}</span> <Pill tone={w.kyc_status === 'approved' ? 'ok' : 'warn'}>{w.kyc_status}</Pill> {w.blocked && <Pill tone="bad">Bloqueada</Pill>} {w.custom_fee_bps != null && <Pill tone="action">Taxa {w.custom_fee_bps / 100}%</Pill>} {w.reserve_pct > 0 && <Pill tone="warn">Reserva {w.reserve_pct}% / {w.reserve_days}d</Pill>} {w.payouts_paused && <Pill tone="bad">Saques pausados</Pill>}</span>
+        <Button size="sm" variant="secondary" onClick={() => setEdit({ ...w, reason: '', fee: w.custom_fee_bps != null ? String(w.custom_fee_bps / 100) : '', limit: String(w.daily_withdraw_limit / 100), reserve: String(w.reserve_pct), reserveDays: String(w.reserve_days) })}>Gerir</Button></li>))}</ul>}</Card>
+    <Modal open={!!edit} onClose={() => setEdit(null)} title={edit?.name ?? ''} footer={<><Button variant={edit?.blocked ? 'ok' : 'danger'} onClick={async () => { try { await post(`/v1/admin/accounts/${edit.id}/block`, { blocked: !edit.blocked, reason: edit.reason }); setEdit(null); load(); } catch (e) { setMsg(Object.values((e as ApiError).fields ?? {})[0] ?? (e as ApiError).title); setEdit(null); } }}>{edit?.blocked ? 'Desbloquear' : 'Bloquear conta'}</Button><Button onClick={async () => { try { await api('PATCH', `/v1/admin/accounts/${edit.id}/limits`, { custom_fee_bps: edit.fee ? Math.round(Number(edit.fee.replace(',', '.')) * 100) : null, daily_withdraw_limit: Math.round(Number(edit.limit) * 100), reserve_pct: Number(edit.reserve) || 0, reserve_days: Number(edit.reserveDays) || 30, reason: edit.reason }); setEdit(null); load(); } catch (e) { setMsg(Object.values((e as ApiError).fields ?? {})[0] ?? (e as ApiError).title); setEdit(null); } }}>Salvar limites</Button></>}>
+      {edit && <div className="space-y-3"><Field label="Taxa negociada (%) — vazio = padrão" value={edit.fee} onChange={e => setEdit({ ...edit, fee: e.target.value })} /><Field label="Limite diário de saque (R$)" value={edit.limit} onChange={e => setEdit({ ...edit, limit: e.target.value })} /><div className="grid grid-cols-2 gap-3"><Field label="Reserva de segurança (%)" inputMode="numeric" value={edit.reserve} onChange={e => setEdit({ ...edit, reserve: e.target.value.replace(/\D/g, '') })} hint="0 = segue a regra de contas novas." /><Field label="Retida por (dias)" inputMode="numeric" value={edit.reserveDays} onChange={e => setEdit({ ...edit, reserveDays: e.target.value.replace(/\D/g, '') })} /></div>
+        {edit.payouts_paused && <Banner tone="bad">Saques pausados: {edit.payouts_paused_reason}</Banner>}
+        <Button variant="secondary" disabled={edit.reason.trim().length < 10} onClick={async () => { try { await post(`/v1/admin/accounts/${edit.id}/payouts`, { paused: !edit.payouts_paused, reason: edit.reason }); setEdit(null); load(); } catch (e) { setMsg(Object.values((e as ApiError).fields ?? {})[0] ?? (e as ApiError).title); setEdit(null); } }}>{edit.payouts_paused ? 'Liberar saques' : 'Pausar saques'}</Button><Textarea label="Motivo (obrigatório, vai para a auditoria)" value={edit.reason} onChange={e => setEdit({ ...edit, reason: e.target.value })} /></div>}
     </Modal></>);
 }
 
