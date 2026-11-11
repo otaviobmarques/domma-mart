@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Req, Res, Headers, Inject } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Req, Res, Headers, Inject } from '@nestjs/common';
 import type { Response } from 'express';
 import { randomInt } from 'node:crypto';
 import { PrismaService } from '../../infra/prisma.service';
@@ -177,6 +177,21 @@ export class CustomerController {
     try { saved = await this.gateway.saveCard!({ customer: { name: c.name, email: c.email, document: decrypt(c.document_enc), phone: decrypt(c.phone_enc) }, cardToken: card_token }); }
     catch { throw new AppError('VALIDATION_ERROR', { fields: { card_token: 'Não conseguimos validar este cartão. Confira os dados.' } }); }
     await this.prisma.subscriptions.update({ where: { id }, data: { card_token_ref: saved.tokenRef, card_brand: saved.brand, card_last4: saved.last4, ...(s.status === 'past_due' ? { next_charge_at: new Date() } : {}) } });
+    return { ok: true };
+  }
+
+  /** Cartões guardados para a compra com 1 clique (só bandeira e final). */
+  @Get('cards') @Customer()
+  async cards(@Cust() cu: CustomerCtx) {
+    const cards = await this.prisma.saved_cards.findMany({ where: { customer_id: cu.customerId, revoked_at: null }, orderBy: { created_at: 'desc' } });
+    return toJSON(cards.map(k => ({ id: k.id, brand: k.brand, last4: k.last4, created_at: k.created_at, last_used_at: k.last_used_at })));
+  }
+
+  /** Remover cartão guardado (LGPD: o comprador revoga o consentimento quando quiser). */
+  @Delete('cards/:id') @Customer() @HttpCode(200)
+  async removeCard(@Cust() cu: CustomerCtx, @Param('id') id: string) {
+    const r = await this.prisma.saved_cards.updateMany({ where: { id, customer_id: cu.customerId, revoked_at: null }, data: { revoked_at: new Date() } });
+    if (!r.count) throw new AppError('NOT_FOUND');
     return { ok: true };
   }
 

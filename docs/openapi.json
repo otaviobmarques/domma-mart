@@ -2591,6 +2591,91 @@
         }
       }
     },
+    "/v1/customer/cards": {
+      "get": {
+        "operationId": "Customer_cards",
+        "tags": [
+          "customer"
+        ],
+        "summary": "cards",
+        "description": "Acesso: customer.",
+        "security": [
+          {
+            "customerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/customer/cards/{id}": {
+      "delete": {
+        "operationId": "Customer_removeCard",
+        "tags": [
+          "customer"
+        ],
+        "summary": "remove card",
+        "description": "Acesso: customer. Exige o cabeçalho X-Requested-With: domma (CSRF).",
+        "security": [
+          {
+            "customerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/customer/orders/{id}/receipt.pdf": {
       "get": {
         "operationId": "Customer_receipt",
@@ -5013,6 +5098,50 @@
         }
       }
     },
+    "/v1/public/3ds-token": {
+      "post": {
+        "operationId": "Checkout_threeDSToken",
+        "tags": [
+          "public"
+        ],
+        "summary": "three d s token",
+        "description": "Acesso: public.",
+        "security": [],
+        "parameters": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/public/affiliate-program/{productId}": {
       "get": {
         "operationId": "Affiliates_program",
@@ -5249,6 +5378,94 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/one-click/start": {
+      "post": {
+        "operationId": "Checkout_oneClickStart",
+        "tags": [
+          "public"
+        ],
+        "summary": "one click start",
+        "description": "Acesso: public.",
+        "security": [],
+        "parameters": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/one-click/verify": {
+      "post": {
+        "operationId": "Checkout_oneClickVerify",
+        "tags": [
+          "public"
+        ],
+        "summary": "one click verify",
+        "description": "Acesso: public.",
+        "security": [],
+        "parameters": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",

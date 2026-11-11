@@ -20,13 +20,14 @@ const fake = http.createServer(async (req, res) => {
   calls.push({ method: req.method, path, body, auth: req.headers.authorization, idem: req.headers['idempotency-key'] });
   const send = (s, j) => { res.writeHead(s, { 'content-type': 'application/json' }); res.end(JSON.stringify(j)); };
   if (req.headers.authorization !== 'Basic ' + Buffer.from('sk_test_e2e:').toString('base64')) return send(401, { message: 'Authorization has been denied' });
+  if (req.method === 'GET' && path === '/3ds/tds-token') return send(200, { tds_token: 'tds_e2e' });
   if (req.method === 'POST' && path === '/core/v5/recipients') return send(200, { id: `rp_NOVO${++seq}`, status: 'registration' });
   if (req.method === 'POST' && path === '/core/v5/orders') {
     const p = body.payments[0];
     const id = `ch_${run}${++seq}`;
     if (p.payment_method === 'pix') { charges[id] = { status: 'pending', payment_method: 'pix' }; return send(200, { id: `or_${seq}`, charges: [{ id, status: 'pending', last_transaction: { qr_code: '00020101021226820014br.gov.bcb.pix2560pix.stone.com.br/teste', expires_at: p.pix.expires_at } }] }); }
     if (p.payment_method === 'credit_card') {
-      const okCard = p.credit_card.card_token === 'token_aprovado';
+      const okCard = p.credit_card.card_token === 'token_aprovado' || p.credit_card.card_id === 'card_E2E';
       charges[id] = { status: okCard ? 'paid' : 'failed', payment_method: 'credit_card' };
       return send(200, { id: `or_${seq}`, customer: { id: 'cus_E2E' }, charges: [{ id, status: charges[id].status, last_transaction: okCard ? { status: 'captured', card: { id: 'card_E2E', last_four_digits: '1111', brand: 'Visa' } } : { status: 'not_authorized', acquirer_return_code: '51' } }] });
     }
@@ -109,7 +110,7 @@ ok(split.some(r => /^rp_NOVO/.test(r.recipient_id) && r.amount > 0), 'parte da p
 ok(!!ord?.idem, 'pedido enviado com chave de idempotência');
 const t = new URL('http://x' + o.body.next.url).searchParams.get('t');
 const pix = (await req('GET', `/v1/orders/${o.body.order_id}/pix?t=${t}`)).body;
-ok(pix.copy_paste?.startsWith('000201') && pix.qr?.startsWith('data:image/png'), 'QR Code gerado a partir do copia-e-cola da Pagar.me');
+ok(pix.copy_paste?.startsWith('000201') && pix.qr?.startsWith('data:image/svg+xml'), 'QR Code gerado a partir do copia-e-cola da Pagar.me');
 
 console.log('\n4) Webhook com autenticação básica + consulta ativa');
 const chargeId = Object.keys(charges).find(k => charges[k].payment_method === 'pix');
@@ -135,7 +136,32 @@ ok(cardCall?.body.payments[0].credit_card.card_token === 'token_aprovado' && !JS
 const c2 = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: buyer(3), method: 'card', card_token: 'token_sem_limite' }, null, { 'idempotency-key': randomUUID() });
 ok(c2.status === 402 && c2.body.code === 'CARD_INSUFFICIENT_FUNDS', 'recusa por saldo vira mensagem clara');
 
-console.log('\n6) Saque');
+console.log('\n6) 3-D Secure e compra com 1 clique');
+ok(offer.three_ds?.scriptUrl === 'https://3ds-nx-js.stone.com.br/test/v2/3ds2.min.js', 'checkout recebe o script 3DS do ambiente de teste');
+const tds = await req('POST', '/v1/public/3ds-token', {});
+ok(tds.status === 200 && tds.body.token === 'tds_e2e', 'token 3DS gerado no servidor (chave secreta não vai ao navegador)');
+const bill = { zip: '30140-071', street: 'Rua da Bahia', number: '100', district: 'Centro', city: 'Belo Horizonte', state: 'MG' };
+const denied = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: buyer(4), method: 'card', card_token: 'token_aprovado', billing_address: bill, three_ds: { transaction_id: 'tds-trans-negado', status: 'N' } }, null, { 'idempotency-key': randomUUID() });
+ok(denied.status === 402 && /banco não confirmou/.test(denied.body.title), 'banco negou a autenticação → compra não segue');
+const before3 = calls.filter(c => c.path === '/core/v5/orders').length;
+const auth = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: buyer(5), method: 'card', card_token: 'token_aprovado', save_card: true, billing_address: bill, three_ds: { transaction_id: 'tds-trans-ok', status: 'Y' } }, null, { 'idempotency-key': randomUUID() });
+const cc3 = calls.filter(c => c.path === '/core/v5/orders').pop()?.body.payments[0].credit_card;
+ok(auth.status === 201 && calls.filter(c => c.path === '/core/v5/orders').length === before3 + 1, 'compra autenticada aprovada (e a negada nem chegou à Pagar.me)');
+ok(cc3?.authentication?.threed_secure?.transaction_id === 'tds-trans-ok' && cc3.authentication.threed_secure.mpi === 'pagarme', 'autenticação 3DS enviada na cobrança');
+ok(cc3?.card?.billing_address?.zip_code === '30140071', 'endereço de cobrança enviado junto');
+// 1 clique com o cartão guardado na compra acima
+const ocEmail = calls.filter(c => c.path === '/core/v5/orders').pop()?.body.customer?.email;
+await req('POST', '/v1/public/one-click/start', { email: ocEmail });
+const ob = (await req('GET', '/v1/dev/outbox')).body;
+const code = ob.find(n => n.template === 'one_click_code')?.body.match(/(\d{6})/)?.[1];
+const v = await req('POST', '/v1/public/one-click/verify', { email: ocEmail, code });
+ok(v.status === 200 && v.body.cards?.[0]?.last4 === '1111', 'cartão guardado na Pagar.me aparece para o 1 clique');
+const oc = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { method: 'card', one_click: { token: v.body.token, card_id: v.body.cards?.[0]?.id } }, null, { 'idempotency-key': randomUUID() });
+const occ = calls.filter(c => c.path === '/core/v5/orders').pop()?.body;
+ok(oc.status === 201 && occ?.customer_id === 'cus_E2E' && occ.payments[0].credit_card.card_id === 'card_E2E', 'compra com 1 clique usa o cliente e o cartão guardados na Pagar.me');
+ok(occ?.payments[0].credit_card.recurrence_cycle === undefined && occ.payments[0].credit_card.card_token === undefined, 'sem marcar como recorrência e sem token novo');
+
+console.log('\n7) Saque');
 const wd = await req('POST', '/v1/finance/withdrawals', { amount_cents: 1000 }, 'nova', { 'idempotency-key': randomUUID(), 'x-otp': totp(s2.secret) });
 ok(wd.body.code === 'KYC_REQUIRED', 'antes da aprovação da identidade, não saca');
 

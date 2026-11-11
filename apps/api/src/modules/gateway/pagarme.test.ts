@@ -58,7 +58,7 @@ describe('PagarmeGateway', () => {
     const { f, calls } = fakeFetch(() => ({ json: { id: 'or_1', charges: [{ id: 'ch_1', status: 'pending', last_transaction: { qr_code: '00020126580014BR.GOV.BCB.PIX', expires_at: '2026-11-11T12:30:00Z' } }] } }));
     const r = await new PagarmeGateway(f).createCharge(base);
     expect(r).toMatchObject({ chargeId: 'ch_1', status: 'pending', pix: { copyPaste: '00020126580014BR.GOV.BCB.PIX' } });
-    expect(r.pix!.qrDataUrl.startsWith('data:image/png;base64,')).toBe(true);
+    expect(r.pix!.qrDataUrl.startsWith('data:image/svg+xml;base64,')).toBe(true);
     const c = calls[0];
     expect(c.method).toBe('POST');
     expect(c.url).toBe('https://api.pagar.me/core/v5/orders');
@@ -94,6 +94,32 @@ describe('PagarmeGateway', () => {
     expect(calls[0].body.payments[0].credit_card).toMatchObject({ card_id: 'card_XYZ', recurrence_cycle: 'subsequent' });
     expect(parseCardRef('pgm:cus_A:card_B')).toEqual({ customerId: 'cus_A', cardId: 'card_B' });
     expect(parseCardRef('card_sbx_x')).toBeNull();
+  });
+
+  it('1 clique: cartão guardado sem marcar recorrência (compra iniciada pelo comprador)', async () => {
+    const { f, calls } = fakeFetch(() => ({ json: { charges: [{ id: 'ch_5', status: 'paid', last_transaction: { status: 'captured' } }] } }));
+    await new PagarmeGateway(f).createCharge({ ...base, method: 'card', savedCardRef: 'pgm:cus_ABC:card_XYZ', cardOnFile: 'one_click' });
+    expect(calls[0].body.payments[0].credit_card.card_id).toBe('card_XYZ');
+    expect(calls[0].body.payments[0].credit_card.recurrence_cycle).toBeUndefined();
+  });
+
+  it('3-D Secure: desligado por padrão; ligado expõe o script certo e envia a autenticação', async () => {
+    expect(new PagarmeGateway().publicConfig().threeDS).toBeNull();
+    process.env.PAGARME_3DS = 'on';
+    try {
+      const { f, calls } = fakeFetch(c => ({ json: c.url.endsWith('/tds-token') ? { tds_token: 'tds_abc' } : { charges: [{ id: 'ch_6', status: 'paid', last_transaction: { status: 'captured' } }] } }));
+      const g = new PagarmeGateway(f);
+      expect(g.publicConfig().threeDS).toEqual({ scriptUrl: 'https://3ds-nx-js.stone.com.br/test/v2/3ds2.min.js' });
+      expect(await g.threeDSToken()).toBe('tds_abc');
+      expect(calls[0].url).toBe('https://3ds-sdx.stone.com.br/v2/tds-token');
+      expect(calls[0].headers.authorization).toBe('Basic ' + Buffer.from('sk_test_abc:').toString('base64'));
+      await g.createCharge({ ...base, method: 'card', cardToken: 'token_ok', threeDS: { transactionId: 'f7d1c0de-3ds', status: 'Y' }, billingAddress: { zip: '30140-071', street: 'Rua da Bahia', number: '100', district: 'Centro', city: 'Belo Horizonte', state: 'mg' } });
+      const cc = calls[1].body.payments[0].credit_card;
+      expect(cc.authentication).toEqual({ type: 'threed_secure', threed_secure: { mpi: 'pagarme', transaction_id: 'f7d1c0de-3ds' } });
+      expect(cc.card.billing_address).toMatchObject({ country: 'BR', state: 'MG', zip_code: '30140071', line_1: '100, Rua da Bahia, Centro' });
+      process.env.PAGARME_SECRET_KEY = 'sk_live_abc';
+      expect(new PagarmeGateway(f).publicConfig().threeDS!.scriptUrl).toBe('https://3ds-nx-js.stone.com.br/live/v2/3ds2.min.js');
+    } finally { delete process.env.PAGARME_3DS; }
   });
 
   it('reembolso parcial cancela só o valor pedido', async () => {

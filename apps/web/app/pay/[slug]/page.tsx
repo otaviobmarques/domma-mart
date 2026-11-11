@@ -3,6 +3,7 @@ import { use, useEffect, useMemo, useRef, useState } from 'react';
 import { get, post, api, ApiError, uuid } from '@/lib/api';
 import { brl, maskDoc, maskPhone, digits, isValidCPF, isValidCNPJ, emailSuggestion } from '@/lib/format';
 import { tokenizeCard, brandOf } from '@/lib/tokenizer';
+import { run3DS, needs3DS, type BillingAddress } from '@/lib/threeds';
 import { loadPixels, track } from '@/lib/pixels';
 import { Button, Field, Skeleton, Banner, Initials, cx, Logo } from '@/components/ui';
 
@@ -11,7 +12,7 @@ type Offer = {
   installment_interest: 'buyer' | 'producer'; max_installments: number; installment_options: { n: number; installment_cents: number; total_cents: number; interest_free: boolean }[];
   product: { name: string; type: string; cover_url: string | null; description: string | null }; seller: { name: string; whatsapp: string | null };
   theme: { color?: string; logo_url?: string; banner_url?: string; testimonials?: { name: string; text: string }[]; countdown_minutes?: number; pixels?: any };
-  bumps: { offer_id: string; name: string; headline: string | null; price_cents: number; cover_url: string | null }[]; gateway: string; gateway_public_key?: string | null;
+  bumps: { offer_id: string; name: string; headline: string | null; price_cents: number; cover_url: string | null }[]; gateway: string; gateway_public_key?: string | null; three_ds?: { scriptUrl: string } | null; one_click?: boolean;
 };
 
 const ORDER = ['pix', 'card', 'boleto'] as const;
@@ -39,6 +40,12 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
   const [method, setMethod] = useState<'pix' | 'card' | 'boleto'>('pix');
   const [card, setCard] = useState({ number: '', exp: '', cvv: '', name: '' });
   const [installments, setInstallments] = useState(1);
+  // compra com 1 clique (cartão guardado, confirmado por código no e-mail)
+  const [saveCard, setSaveCard] = useState(false);
+  const [oc, setOc] = useState<{ step: 'off' | 'code' | 'ready'; code: string; token?: string; cards?: { id: string; brand: string; last4: string }[]; cardId?: string; firstName?: string; err?: string; busy?: boolean }>({ step: 'off', code: '' });
+  const ocReady = oc.step === 'ready' && !!oc.token && !!oc.cardId;
+  // endereço de cobrança, pedido só quando o banco confirma a compra (3-D Secure)
+  const [bill, setBill] = useState<BillingAddress>({ zip: '', street: '', number: '', complement: '', district: '', city: '', state: '' });
   const [bumps, setBumps] = useState<string[]>([]);
   const [couponOpen, setCouponOpen] = useState(false);
   const [couponInput, setCouponInput] = useState('');
@@ -84,8 +91,29 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
     catch (e) { setCoupon(null); setCouponErr((e as ApiError).title || 'Cupom inválido ou expirado.'); }
   }
 
+  async function ocStart() {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) { setErrors({ email: 'Digite seu e-mail para receber o código.' }); focusFirst({ email: 'x' }); return; }
+    setOc({ ...oc, step: 'code', busy: true, err: undefined });
+    try { await post('/v1/public/one-click/start', { email: email.trim().toLowerCase() }); setOc(o => ({ ...o, busy: false })); }
+    catch (e) { setOc(o => ({ ...o, busy: false, err: (e as ApiError).title })); }
+  }
+  async function ocVerify() {
+    setOc(o => ({ ...o, busy: true, err: undefined }));
+    try {
+      const r = await post<any>('/v1/public/one-click/verify', { email: email.trim().toLowerCase(), code: oc.code });
+      if (!r.cards.length) { setOc({ step: 'off', code: '', err: 'Não encontramos cartão guardado neste e-mail.' }); return; }
+      setOc({ step: 'ready', code: '', token: r.token, cards: r.cards, cardId: r.cards[0].id, firstName: r.first_name });
+      setErrors({});
+    } catch (e) { setOc(o => ({ ...o, busy: false, err: (e as ApiError).title })); }
+  }
+  async function lookupZip(z: string) {
+    if (digits(z).length !== 8) return;
+    try { const j = await (await fetch(`https://viacep.com.br/ws/${digits(z)}/json/`)).json(); if (!j.erro) setBill(b => ({ ...b, street: b.street || j.logradouro || '', district: b.district || j.bairro || '', city: j.localidade || b.city, state: j.uf || b.state })); } catch { /* preenchimento manual */ }
+  }
+
   function validate() {
     const e: Record<string, string> = {};
+    if (method === 'card' && ocReady) return e; // dados e cartão já confirmados pelo código do e-mail
     const n = name.trim();
     if (n.length < 3 || n.split(/\s+/).length < 2) e.name = 'Digite seu nome completo.';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) e.email = 'Confira seu e-mail. Ele parece estar incompleto.';
@@ -97,12 +125,20 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
       if (digits(card.number).length < 13) e.card_number = 'Confira o número do cartão.';
       if (!/^\d{2}\/\d{2}$/.test(card.exp)) e.card_exp = 'Use o formato MM/AA.';
       if (!/^\d{3,4}$/.test(card.cvv)) e.card_cvv = 'Confira o CVV.';
+      if (offer?.three_ds && needs3DS(brandOf(card.number))) {
+        if (digits(bill.zip).length !== 8) e.bill_zip = 'CEP com 8 números.';
+        if (!bill.number.trim()) e.bill_number = 'Número (ou S/N).';
+        if (bill.street.trim().length < 2) e.bill_street = 'Informe a rua.';
+        if (bill.district.trim().length < 2) e.bill_district = 'Informe o bairro.';
+        if (bill.city.trim().length < 2) e.bill_city = 'Informe a cidade.';
+        if (!/^[A-Za-z]{2}$/.test(bill.state)) e.bill_state = 'UF com 2 letras.';
+      }
     }
     return e;
   }
 
   function focusFirst(e: Record<string, string>) {
-    const order = ['name', 'email', 'phone', 'doc', 'card_number', 'card_exp', 'card_cvv'];
+    const order = ['name', 'email', 'phone', 'doc', 'card_number', 'card_exp', 'card_cvv', 'bill_zip', 'bill_number', 'bill_street', 'bill_district', 'bill_city', 'bill_state'];
     const k = order.find(x => e[x]);
     if (k) setTimeout(() => (document.getElementById(`f-${k}`) as HTMLInputElement | null)?.focus(), 0);
   }
@@ -117,7 +153,17 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
     setBusy(true);
     try {
       let card_token: string | undefined;
-      if (method === 'card') {
+      let three_ds: { transaction_id: string; status: string } | undefined;
+      const withBill = method === 'card' && !ocReady && !!offer.three_ds && needs3DS(brandOf(card.number));
+      if (method === 'card' && !ocReady) {
+        if (withBill) {
+          // o banco confirma a compra antes do pagamento (pode abrir uma janela do app ou SMS)
+          try {
+            const { token } = await post<{ token: string }>('/v1/public/3ds-token', {});
+            const [mm, yy] = card.exp.split('/').map(Number);
+            three_ds = await run3DS({ scriptUrl: offer.three_ds!.scriptUrl, token, amountCents: p.total, card: { number: card.number, name, mm, yy }, customer: { name: name.trim(), email: email.trim(), phone, document: doc }, billing: bill });
+          } catch (err) { setAlert({ text: (err as Error).message, offerPix: offer.methods.includes('pix') }); setBusy(false); return; }
+        }
         try { card_token = (await tokenizeCard({ ...card, name }, { provider: offer.gateway, publicKey: offer.gateway_public_key })).token; }
         catch (err) { setErrors({ card_number: (err as Error).message }); focusFirst({ card_number: 'x' }); setBusy(false); return; }
         track('AddPaymentInfo', { value: p.total / 100 });
@@ -126,7 +172,11 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
       qs.forEach((v, k) => { if (/^(utm_|src$|fbclid$|gclid$)/.test(k)) tracking[k] = v.slice(0, 300); });
       if (document.referrer) tracking.referrer = document.referrer.slice(0, 300);
       const r = await api<any>('POST', `/v1/checkout/${offer.offer_id}/orders`, {
-        customer: { name: name.trim(), email: email.trim().toLowerCase(), phone, document: digits(doc) },
+        customer: method === 'card' && ocReady ? undefined : { name: name.trim(), email: email.trim().toLowerCase(), phone, document: digits(doc) },
+        one_click: method === 'card' && ocReady ? { token: oc.token, card_id: oc.cardId } : undefined,
+        save_card: method === 'card' && !ocReady && saveCard ? true : undefined,
+        billing_address: withBill ? { ...bill, zip: digits(bill.zip), state: bill.state.toUpperCase(), complement: bill.complement || undefined } : undefined,
+        three_ds,
         method, installments: method === 'card' ? installments : 1, card_token, bump_offer_ids: bumps,
         coupon_code: coupon?.code, tracking, affiliate_code: qs.get('ref') ?? undefined,
       }, { idem: idemRef.current });
@@ -140,6 +190,7 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
         for (const [k, v] of Object.entries(x.fields)) { if (map[k] === 'coupon') setCouponErr(v); else fe[map[k] ?? k] = v; }
         setErrors(fe); focusFirst(fe);
       }
+      if (x.code === 'AUTH_LINK_EXPIRED' && ocReady) { setOc({ step: 'off', code: '', err: x.title }); setBusy(false); return; }
       if (x.status === 402) setAlert({ text: x.title, offerPix: offer.methods.includes('pix') });
       else if (x.code === 'RATE_LIMITED') setAlert({ text: 'Muitas tentativas seguidas. Aguarde alguns minutos e tente de novo.' });
       else if (!x.fields || !Object.keys(x.fields).length) setAlert({ text: x.title });
@@ -179,7 +230,9 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
     );
   }
 
-  const btnLabel = method === 'pix' ? 'Pagar com Pix' : method === 'card' ? 'Comprar agora' : 'Gerar boleto';
+  const ocCard = ocReady ? oc.cards!.find(k => k.id === oc.cardId) : null;
+  const btnLabel = method === 'pix' ? 'Pagar com Pix' : method === 'card' ? (ocCard ? `Comprar com ${ocCard.brand.charAt(0).toUpperCase()}${ocCard.brand.slice(1)} •••• ${ocCard.last4}` : 'Comprar agora') : 'Gerar boleto';
+  const show3DSBill = method === 'card' && !ocReady && !!offer.three_ds && needs3DS(brandOf(card.number));
   const brand = brandOf(card.number);
   return (
     <Shell color={color} logo={offer.theme.logo_url} countdown={offer.theme.countdown_minutes}>
@@ -196,7 +249,12 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
           </div>
         </div>
 
-        <div className="mt-6 space-y-4">
+ {method === 'card' && ocReady ? (
+          <div className="mt-6 flex items-center justify-between gap-2 rounded-ctl bg-canvas px-4 py-3 text-[15px]">
+            <span>Comprando como <b>{oc.firstName}</b> ({email.trim().toLowerCase()})</span>
+            <button type="button" className="min-h-[44px] font-semibold text-action underline" onClick={() => setOc({ step: 'off', code: '' })}>Trocar</button>
+          </div>
+        ) : <div className="mt-6 space-y-4">
           <Field id="f-name" label="Seu nome" autoComplete="name" value={name} onChange={e => setName(e.target.value)} error={errors.name} big maxLength={120} placeholder="Nome e sobrenome" />
           <div>
             <Field id="f-email" label="Seu e-mail" type="email" autoComplete="email" inputMode="email" value={email} onChange={e => { setEmail(e.target.value); setSuggest(null); }} onBlur={onEmailBlur} error={errors.email} big hint="Seu acesso chega aqui." maxLength={200} />
@@ -204,7 +262,7 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
           </div>
           <Field id="f-phone" label="Seu WhatsApp" type="tel" autoComplete="tel-national" inputMode="numeric" value={phone} onChange={e => setPhone(maskPhone(e.target.value))} error={errors.phone} big placeholder="(00) 00000-0000" />
           <Field id="f-doc" label="Seu CPF" inputMode="numeric" autoComplete="off" value={doc} onChange={e => setDoc(maskDoc(e.target.value))} error={errors.doc} big placeholder="000.000.000-00" />
-        </div>
+        </div>}
 
         <fieldset className="mt-6">
           <legend className="mb-2 text-[14px] font-semibold">Como você quer pagar?</legend>
@@ -219,7 +277,38 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
           <div className="mt-3">
             {method === 'pix' && <p className="rounded-ctl bg-canvas px-4 py-3 text-[14.5px] text-ink-soft">Você paga pelo app do seu banco e o acesso é liberado na hora.</p>}
             {method === 'boleto' && <Banner tone="warn">O boleto leva até 3 dias úteis para compensar. Seu acesso é liberado depois disso.</Banner>}
-            {method === 'card' && (
+ {method === 'card' && offer.one_click && oc.step !== 'ready' && (
+              <div className="mb-3 rounded-ctl border border-line bg-white p-3 text-[14.5px]">
+                {oc.step === 'off' ? <button type="button" className="min-h-[44px] text-left font-semibold text-action underline" onClick={ocStart}>Já comprou aqui com cartão? Pague com o cartão guardado</button>
+                  : <div className="space-y-2">
+                    <p>Enviamos um código de 6 números para <b>{email.trim().toLowerCase()}</b>.</p>
+                    <div className="flex items-end gap-2">
+                      <Field id="f-oc_code" label="Código do e-mail" inputMode="numeric" autoComplete="one-time-code" value={oc.code} onChange={e => setOc({ ...oc, code: digits(e.target.value).slice(0, 6) })} mono className="flex-1" />
+                      <Button type="button" variant="secondary" loading={oc.busy} disabled={oc.code.length !== 6} onClick={ocVerify}>Confirmar</Button>
+                    </div>
+                    <button type="button" className="min-h-[36px] text-[13.5px] text-ink-mute underline" onClick={() => setOc({ step: 'off', code: '' })}>Digitar o cartão</button>
+                  </div>}
+                {oc.err && <p className="mt-1 text-[13.5px] text-bad">{oc.err}</p>}
+              </div>
+            )}
+            {method === 'card' && ocReady && (
+              <div className="space-y-2 rounded-ctl bg-canvas p-4">
+                <p className="text-[14px] font-semibold">Seu cartão guardado</p>
+                {oc.cards!.map(k => (
+                  <label key={k.id} className={cx('flex min-h-[52px] cursor-pointer items-center gap-3 rounded-ctl border-2 bg-white px-3', oc.cardId === k.id ? 'border-[var(--brand)]' : 'border-line')}>
+                    <input type="radio" name="saved_card" checked={oc.cardId === k.id} onChange={() => setOc({ ...oc, cardId: k.id })} />
+                    <span className="capitalize">{k.brand}</span><span className="num">•••• {k.last4}</span>
+                  </label>
+                ))}
+                {offer.billing_type !== 'subscription' && maxN > 1 && (
+                  <select aria-label="Parcelas" value={installments} onChange={e => setInstallments(Number(e.target.value))} className="num min-h-[52px] w-full rounded-ctl border border-line bg-white px-3 text-[16px] focus:outline-none focus:ring-2 focus:ring-action">
+                    {Array.from({ length: maxN }, (_, k) => k + 1).map(n => { const x = plan(base, n, offer.installment_interest); return <option key={n} value={n}>{n}x de {brl(x.inst)}{x.free ? ' (sem juros)' : ''}</option>; })}
+                  </select>
+                )}
+                <button type="button" className="min-h-[36px] text-[13.5px] text-ink-mute underline" onClick={() => setOc({ step: 'off', code: '' })}>Usar outro cartão</button>
+              </div>
+            )}
+            {method === 'card' && !ocReady && (
               <div className="space-y-3 rounded-ctl bg-canvas p-4">
                 <Field id="f-card_number" label="Número do cartão" inputMode="numeric" autoComplete="cc-number" value={card.number} onChange={e => setCard({ ...card, number: digits(e.target.value).slice(0, 19).replace(/(\d{4})(?=\d)/g, '$1 ') })} error={errors.card_number} big mono right={brand ? <span className="text-[12px] font-bold uppercase text-ink-mute">{brand}</span> : null} />
                 <div className="grid grid-cols-2 gap-3">
@@ -234,9 +323,24 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
                     </select>
                   </div>
                 )}
+                {show3DSBill && <div className="space-y-3 border-t border-line pt-3">
+                  <p className="text-[13.5px] text-ink-mute">Endereço da fatura do cartão — o banco usa para confirmar que é você.</p>
+                  <div className="grid grid-cols-[1fr_96px] gap-3">
+                    <Field id="f-bill_zip" label="CEP" inputMode="numeric" autoComplete="postal-code" value={bill.zip} onChange={e => { const v = digits(e.target.value).slice(0, 8); setBill({ ...bill, zip: v.length > 5 ? `${v.slice(0, 5)}-${v.slice(5)}` : v }); lookupZip(v); }} error={errors.bill_zip} />
+                    <Field id="f-bill_number" label="Número" value={bill.number} onChange={e => setBill({ ...bill, number: e.target.value.slice(0, 10) })} error={errors.bill_number} />
+                  </div>
+                  <Field id="f-bill_street" label="Rua" autoComplete="address-line1" value={bill.street} onChange={e => setBill({ ...bill, street: e.target.value })} error={errors.bill_street} />
+                  <div className="grid grid-cols-[1fr_1fr_72px] gap-3">
+                    <Field id="f-bill_district" label="Bairro" value={bill.district} onChange={e => setBill({ ...bill, district: e.target.value })} error={errors.bill_district} />
+                    <Field id="f-bill_city" label="Cidade" autoComplete="address-level2" value={bill.city} onChange={e => setBill({ ...bill, city: e.target.value })} error={errors.bill_city} />
+                    <Field id="f-bill_state" label="UF" value={bill.state} onChange={e => setBill({ ...bill, state: e.target.value.replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase() })} error={errors.bill_state} />
+                  </div>
+                </div>}
+                {offer.one_click && <label className="flex min-h-[44px] cursor-pointer items-start gap-2 text-[14px] text-ink-soft"><input type="checkbox" className="mt-1" checked={saveCard} onChange={e => setSaveCard(e.target.checked)} /><span>Guardar este cartão para comprar com 1 clique. O número fica com o banco; você remove quando quiser em “Minhas compras”.</span></label>}
                 {offer.gateway === 'sandbox' && <p className="text-[12.5px] text-ink-mute">Ambiente de teste: use 4111 1111 1111 1111, validade futura e qualquer CVV.</p>}
               </div>
             )}
+            <div id="tdsMethodContainer" className="hidden" /><div id="challengeContainer" />
           </div>
         </fieldset>
 

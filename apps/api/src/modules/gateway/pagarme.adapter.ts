@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import QRCode from 'qrcode';
+import { pixQrDataUrl } from './qr';
 import { GatewayAdapter, CreateChargeInput, ChargeResult, GatewayEvent, ChargeStatus, RecipientProfile, BankAccount, Address, SplitRule } from './gateway.types';
 import { safeEqual } from '../../common/crypto';
 import { onlyDigits } from '../../domain/validators';
@@ -30,6 +30,10 @@ export class PagarmeGateway implements GatewayAdapter {
   private hookUser = process.env.PAGARME_WEBHOOK_USER || '';
   private hookPass = process.env.PAGARME_WEBHOOK_PASSWORD || '';
   private statement = (process.env.PAGARME_STATEMENT || 'DOMMA').replace(/[^A-Za-z0-9 ]/g, '').slice(0, 13);
+  /** 3-D Secure (Stone 3DS 2.x): PAGARME_3DS=on liga; o ambiente segue a chave (sk_test_ → sandbox). */
+  private threeDSOn = process.env.PAGARME_3DS === 'on';
+  private threeDSLive = (process.env.PAGARME_3DS_ENV || (this.sk.startsWith('sk_test_') ? 'sandbox' : 'production')) === 'production';
+  private threeDSApi = process.env.PAGARME_3DS_API_URL || (this.threeDSLive ? 'https://3ds.stone.com.br/v2' : 'https://3ds-sdx.stone.com.br/v2');
 
   constructor(private fetchImpl: typeof fetch = fetch) {
     const missing = [['PAGARME_SECRET_KEY', this.sk], ['PAGARME_PUBLIC_KEY', this.pk], ['PAGARME_PLATFORM_RECIPIENT_ID', this.platform], ['PAGARME_WEBHOOK_USER', this.hookUser], ['PAGARME_WEBHOOK_PASSWORD', this.hookPass]].filter(([, v]) => !v).map(([k]) => k);
@@ -37,7 +41,17 @@ export class PagarmeGateway implements GatewayAdapter {
     if (this.hookPass.length < 16) throw new Error('Pagar.me: PAGARME_WEBHOOK_PASSWORD precisa de pelo menos 16 caracteres');
   }
 
-  publicConfig() { return { provider: 'pagarme', publicKey: this.pk }; }
+  publicConfig() {
+    return { provider: 'pagarme', publicKey: this.pk, threeDS: this.threeDSOn ? { scriptUrl: `https://3ds-nx-js.stone.com.br/${this.threeDSLive ? 'live' : 'test'}/v2/3ds2.min.js` } : null };
+  }
+
+  async threeDSToken() {
+    if (!this.threeDSOn) throw new Error('3-D Secure desligado');
+    const r = await this.fetchImpl(`${this.threeDSApi}/tds-token`, { headers: { authorization: 'Basic ' + Buffer.from(`${this.sk}:`).toString('base64') }, signal: AbortSignal.timeout(10_000) });
+    const j: any = await r.json().catch(() => null);
+    if (!r.ok || !j?.tds_token) throw new PagarmeError(r.status, `3DS token → ${r.status}`);
+    return String(j.tds_token);
+  }
 
   // ───────── HTTP ─────────
   private async call<T = any>(method: string, path: string, body?: unknown, idempotencyKey?: string): Promise<T> {
@@ -122,11 +136,13 @@ export class PagarmeGateway implements GatewayAdapter {
       if (i.savedCardRef) {
         const ref = parseCardRef(i.savedCardRef);
         if (!ref) throw new Error('referência de cartão inválida');
-        cc.card_id = ref.cardId; customerId = ref.customerId; cc.recurrence_cycle = 'subsequent';
+        cc.card_id = ref.cardId; customerId = ref.customerId;
+        if (i.cardOnFile !== 'one_click') cc.recurrence_cycle = 'subsequent'; // renovação de assinatura (iniciada pela loja)
       } else {
         if (!i.cardToken?.startsWith('token_')) return { chargeId: `pgm_invalid_${i.orderId}`, status: 'declined', rawStatus: 'INVALID_TOKEN', declineCode: 'CARD_DECLINED' };
         cc.card_token = i.cardToken;
         if (i.billingAddress) cc.card = { billing_address: this.address(i.billingAddress) };
+        if (i.threeDS) cc.authentication = { type: 'threed_secure', threed_secure: { mpi: 'pagarme', transaction_id: i.threeDS.transactionId.slice(0, 256) } };
       }
       payment.credit_card = cc;
       if (customerId) return this.mapOrder(await this.call('POST', '/orders', this.orderBody(i, payment, customerId), i.idempotencyKey), i);
@@ -150,7 +166,7 @@ export class PagarmeGateway implements GatewayAdapter {
     const raw = String(ch.status || tx.status || 'pending');
     if (i.method === 'pix') {
       if (!tx.qr_code) throw new Error(`Pix não gerado (${raw})`);
-      return { chargeId: ch.id, status: 'pending', rawStatus: raw.toUpperCase(), pix: { copyPaste: tx.qr_code, qrDataUrl: await QRCode.toDataURL(tx.qr_code, { margin: 1, width: 464 }), expiresAt: tx.expires_at ? new Date(tx.expires_at) : i.pixExpiresAt! } };
+      return { chargeId: ch.id, status: 'pending', rawStatus: raw.toUpperCase(), pix: { copyPaste: tx.qr_code, qrDataUrl: await pixQrDataUrl(tx.qr_code), expiresAt: tx.expires_at ? new Date(tx.expires_at) : i.pixExpiresAt! } };
     }
     if (i.method === 'boleto') {
       if (!tx.line && !tx.pdf) throw new Error(`Boleto não gerado (${raw})`);

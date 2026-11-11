@@ -96,6 +96,32 @@ Como funciona:
 
 Testes: `apps/api/src/modules/gateway/pagarme.test.ts` (unitário) e `apps/api/scripts/pagarme.test.mjs` (ponta a ponta contra uma Pagar.me falsa, também no CI).
 
+## Compra com 1 clique
+
+No checkout com cartão, o comprador pode marcar **“Guardar este cartão para comprar com 1 clique”**. Guardamos só a referência do cartão no gateway (cifrada), a bandeira e o final. Na próxima compra, em qualquer aparelho, ele clica em *“Já comprou aqui com cartão?”*, recebe um **código de 6 números por e-mail** e paga sem digitar dados nem cartão. O código vale 10 minutos e é de uso único (5 tentativas). A resposta é a mesma para e-mails com ou sem cartão, para não revelar quem é cliente. O comprador vê e remove os cartões em **Minhas compras**.
+
+## 3-D Secure
+
+Com a Pagar.me, `PAGARME_3DS=on` liga a confirmação do banco (3DS 2.x da Stone) para Visa e Mastercard. O checkout pede o endereço da fatura (o CEP preenche o resto), roda a biblioteca `3ds-nx-js` no navegador e manda só o id da transação autenticada; se o banco negar, a cobrança nem é criada. O ambiente (teste ou produção) segue a chave (`sk_test_…` → sandbox) ou `PAGARME_3DS_ENV`. A compra com 1 clique não passa por 3DS (a Stone não autentica cartão guardado).
+
+## Teste de carga
+
+`load/checkout.k6.js` (k6) simula um lançamento: cada comprador abre a oferta, gera um Pix e abre a tela do Pix, com rampa até `PEAK` compradores por segundo.
+
+```bash
+k6 run -e BASE_URL=http://localhost:4000 -e SLUG=confeitaria -e PEAK=50 load/checkout.k6.js
+```
+
+Resultado com **1 processo da API** (4 vCPUs divididas com Postgres, Redis e o próprio k6):
+
+| Pico | Pedidos Pix/s | Gerar Pix (p95) | Oferta (p95) | Erros |
+|---|---|---|---|---|
+| 50/s, antes da otimização | 32 | 5,5 s | 1,9 s | 0% |
+| 50/s | 37 (todos atendidos) | 60 ms | 17 ms | 0% |
+| 120/s | ~68 (saturado) | 6,6 s | 2,2 s | 0% |
+
+O gargalo era desenhar o QR Code do Pix em PNG (metade da CPU); agora é SVG. Cada processo aguenta **~65 pedidos Pix por segundo** (~230 mil por hora) sem erro; acima disso, a fila cresce mas nada falha. Para lançamentos maiores, aumente as réplicas da API no Railway (ela não guarda estado: sessão, fila e limites ficam no Redis) e confira o limite de conexões do banco.
+
 ## Pendências antes de produção
 
 - **Gateway real**: chaves de teste da Pagar.me para validar o adaptador contra o ambiente deles antes de produção. Afiliados e coprodutores também precisam de identidade + conta bancária para receber a parte deles na Pagar.me.

@@ -82,6 +82,8 @@ jobs:
           PAGARME_PLATFORM_RECIPIENT_ID: rp_PLAT_E2E
           PAGARME_WEBHOOK_USER: domma
           PAGARME_WEBHOOK_PASSWORD: senha-do-webhook-de-teste
+          PAGARME_3DS: 'on'
+          PAGARME_3DS_API_URL: http://127.0.0.1:4230/3ds
           API_PORT: '4100'
           PORT: '4100'
         run: |
