@@ -24,7 +24,7 @@ async function isActiveDomain(host: string) {
   return ok;
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const host = (req.headers.get('host') || '').split(':')[0].toLowerCase();
   if (!host || isMainHost(host)) return NextResponse.next();
   const { pathname } = req.nextUrl;
