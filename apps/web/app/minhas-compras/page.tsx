@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { get, post, api, ApiError } from '@/lib/api';
 import { brl, shortDate, methodLabel, maskDoc, digits } from '@/lib/format';
 import { Button, Card, Skeleton, Banner, Modal, Initials, Logo, Pill, Field, Select } from '@/components/ui';
+import { PrivacyCard } from '@/components/privacy-card';
 
 type P = any;
 const REASONS = [['prefer_not_say', 'Prefiro não dizer'], ['not_expected', 'Não era o que eu esperava'], ['bought_by_mistake', 'Comprei por engano'], ['access_problem', 'Tive problema para acessar']];
@@ -98,6 +99,8 @@ export default function MinhasCompras() {
         <p className="mt-1 text-[14px] text-ink-mute">Para comprar com 1 clique. Guardamos só a bandeira e o final; o número fica com o banco.</p>
         <ul className="mt-2 divide-y divide-line">{cards.map(k => <li key={k.id} className="flex min-h-[48px] items-center justify-between gap-2"><span className="capitalize">{k.brand} <span className="num">•••• {k.last4}</span></span><button className="min-h-[44px] px-2 font-semibold text-bad underline" onClick={async () => { await api('DELETE', `/v1/customer/cards/${k.id}`); setCards(cards.filter(x => x.id !== k.id)); setFlash('Cartão removido.'); }}>Remover</button></li>)}</ul>
       </Card>}
+
+      <div className="mt-6"><PrivacyCard base="/v1/customer/privacy" audience="buyer" onDeleted={() => { location.href = '/minhas-compras/entrar'; }} /></div>
 
       <div className="mt-6 rounded-card border border-dashed border-line bg-white/70 p-4 text-[14.5px]">
         Não achou uma compra? <button className="font-bold text-action underline" onClick={() => setCpfOpen(true)}>Buscar pelo CPF</button>

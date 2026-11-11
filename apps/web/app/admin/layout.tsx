@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { get, ApiError } from '@/lib/api';
 import { Logo, Banner, cx } from '@/components/ui';
 
-const NAV = [['/admin', 'Visão geral', null], ['/admin?v=kyc', 'Fila de KYC', 'kyc'], ['/admin?v=moderacao', 'Moderação de produtos', 'moderation'], ['/admin?v=disputas', 'Disputas e chargebacks', 'disputes'], ['/admin?v=risco', 'Alertas de risco', null], ['/admin?v=contas', 'Contas', null], ['/admin?v=pedidos', 'Pedidos', null], ['/admin?v=ajustes', 'Ajustes de saldo', 'adjustments'], ['/admin?v=conciliacao', 'Conciliação', null], ['/admin?v=auditoria', 'Auditoria', null]] as const;
+const NAV = [['/admin', 'Visão geral', null], ['/admin?v=kyc', 'Fila de KYC', 'kyc'], ['/admin?v=moderacao', 'Moderação de produtos', 'moderation'], ['/admin?v=disputas', 'Disputas e chargebacks', 'disputes'], ['/admin?v=risco', 'Alertas de risco', null], ['/admin?v=contas', 'Contas', null], ['/admin?v=pedidos', 'Pedidos', null], ['/admin?v=ajustes', 'Ajustes de saldo', 'adjustments'], ['/admin?v=privacidade', 'Privacidade (LGPD)', 'privacy'], ['/admin?v=conciliacao', 'Conciliação', null], ['/admin?v=auditoria', 'Auditoria', null]] as const;
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [ov, setOv] = useState<any>(null);
@@ -13,7 +13,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   usePathname();
   useEffect(() => { setV(new URLSearchParams(location.search).get('v') ?? ''); get('/v1/admin/overview').then(setOv).catch(setErr); }, []);
   if (err) return <main className="mx-auto max-w-lg p-8"><Banner tone="bad">{err.code === 'TWO_FACTOR_REQUIRED' ? 'Ative a verificação em duas etapas (Configurações) para acessar o back-office.' : err.code === 'UNAUTHENTICATED' ? 'Entre com sua conta Domma.' : 'Você não tem acesso ao back-office.'}</Banner></main>;
-  const counts: Record<string, number> = ov ? { kyc: ov.pending.kyc, moderation: ov.pending.moderation, disputes: ov.pending.disputes, adjustments: ov.pending.adjustments } : {};
+  const counts: Record<string, number> = ov ? { kyc: ov.pending.kyc, moderation: ov.pending.moderation, disputes: ov.pending.disputes, adjustments: ov.pending.adjustments, privacy: ov.pending.privacy } : {};
   return (
     <div className="flex min-h-screen bg-[#F3F2F8]">
       <aside className="sticky top-0 hidden h-screen w-64 flex-none flex-col bg-ink text-white md:flex">

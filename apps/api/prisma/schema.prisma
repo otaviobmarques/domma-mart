@@ -808,6 +808,25 @@ model recovery_settings {
   updated_at   DateTime @updatedAt @db.Timestamptz
 }
 
+/// Pedidos de titulares (LGPD, art. 18): exclusão, correção e outros.
+model privacy_requests {
+  id           String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  subject_type String // customer | user
+  subject_id   String    @db.Uuid
+  kind         String // deletion | correction | other
+  details      String?
+  status       String    @default("pending") // pending | scheduled | done | rejected
+  retain_until DateTime? @db.Timestamptz // dados guardados por obrigação legal até esta data
+  resolution   String?
+  decided_by   String?   @db.Uuid
+  decided_at   DateTime? @db.Timestamptz
+  created_at   DateTime  @default(now()) @db.Timestamptz
+  updated_at   DateTime  @updatedAt @db.Timestamptz
+
+  @@index([status, created_at])
+  @@index([subject_type, subject_id])
+}
+
 model opt_outs {
   id         String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
   key_hash   String   @unique // hash de e-mail/telefone
