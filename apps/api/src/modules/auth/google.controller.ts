@@ -10,7 +10,7 @@ import { cookieOpts } from './auth.controller';
 import * as rl from '../../infra/rate-limit';
 
 const SESSION_DAYS = 7;
-const TERMS_VERSION = '2026-11-01';
+const TERMS_VERSION = '2026-11-11'; // mesma versão de apps/web/lib/legal.ts
 
 /** Endpoints configuráveis só para teste (servidor falso local); em produção usam os do Google. */
 const AUTH_URL = () => process.env.GOOGLE_AUTH_URL || 'https://accounts.google.com/o/oauth2/v2/auth';

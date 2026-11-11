@@ -20,7 +20,7 @@ import { Inject } from '@nestjs/common';
 const SESSION_DAYS = 7; // RN-82
 /** Mínimo de caracteres da senha. Decisão do cliente: 9 (o descritivo, seção 5.1, sugeria 10). */
 export const MIN_PASSWORD = 9;
-const TERMS_VERSION = '2026-11-01';
+const TERMS_VERSION = '2026-11-11'; // mesma versão de apps/web/lib/legal.ts
 
 /** Checagem contra senhas vazadas por k-anonymity (HIBP) — falha aberta se indisponível. */
 async function isPwned(password: string): Promise<boolean> {

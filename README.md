@@ -126,6 +126,10 @@ O gargalo era desenhar o QR Code do Pix em PNG (metade da CPU); agora é SVG. Ca
 
 Com `EDGE_SECRET` definido **na API (Railway) e no site (Vercel)** com o mesmo valor, o proxy do site carimba cada chamada para a API com esse segredo e com o IP real do visitante (que a Vercel conhece e não deixa forjar). A API recusa qualquer chamada sem o carimbo — por exemplo, direto no domínio `*.up.railway.app` —, então ninguém consegue escolher o próprio IP para furar os limites (pedidos, cupons, código do 1 clique, antifraude). Ficam abertos só `/health` e `/webhooks/*` (os gateways chamam direto, com assinatura própria). Sem `EDGE_SECRET` (desenvolvimento, CI, teste de carga), a API confia em `X-Forwarded-For` como antes. Teste: `apps/api/scripts/edge.test.mjs`.
 
+## Documentos legais
+
+`/termos`, `/privacidade` e `/produtos-proibidos` têm o texto completo (versão em `apps/web/lib/legal.ts`, a mesma registrada no aceite em `auth.controller.ts`). Os dados da empresa aparecem destacados como “a preencher” até serem definidos nas variáveis do site: `NEXT_PUBLIC_LEGAL_COMPANY`, `NEXT_PUBLIC_LEGAL_CNPJ`, `NEXT_PUBLIC_LEGAL_ADDRESS`, `NEXT_PUBLIC_LEGAL_SUPPORT_EMAIL`, `NEXT_PUBLIC_LEGAL_DPO_NAME`, `NEXT_PUBLIC_LEGAL_DPO_EMAIL`, `NEXT_PUBLIC_LEGAL_FORUM` e `NEXT_PUBLIC_LEGAL_PAYMENT_INSTITUTION`. Os textos foram escritos a partir das regras do sistema e **precisam de revisão de advogado** antes do lançamento.
+
 ## Pendências antes de produção
 
 - **Gateway real**: chaves de teste da Pagar.me para validar o adaptador contra o ambiente deles antes de produção. Afiliados e coprodutores também precisam de identidade + conta bancária para receber a parte deles na Pagar.me.
