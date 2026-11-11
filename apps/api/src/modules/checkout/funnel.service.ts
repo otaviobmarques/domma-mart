@@ -146,7 +146,7 @@ export class FunnelService {
     const coproducers = (await this.prisma.coproductions.findMany({ where: { product_id: offer.product_id, status: 'active', OR: [{ ends_at: null }, { ends_at: { gt: new Date() } }] } })).map(cp => ({ id: cp.workspace_id, bps: cp.share_bps }));
     const split = computeSplit({
       baseCents: offer.price_cents, interestCents: plan.interestCents, absorbedCostCents: plan.absorbedCostCents, feeCents: fee.feeCents,
-      producerId: ws.id, affiliate: affiliation ? { id: affiliation.affiliate_workspace_id, bps: offer.product.affiliate_commission_bps } : null, coproducers,
+      producerId: ws.id, affiliate: affiliation ? { id: affiliation.affiliate_workspace_id, bps: offer.affiliate_commission_bps ?? offer.product.affiliate_commission_bps } : null, coproducers,
     });
 
     let order;

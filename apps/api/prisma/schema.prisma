@@ -211,6 +211,14 @@ model products {
   affiliate_commission_bps Int       @default(3000)
   affiliate_cookie_days Int          @default(60)
   affiliate_attribution String       @default("last_click")
+  /// Marketplace de afiliados (Fase 2): produto aparece na vitrine pública para afiliados
+  marketplace_listed Boolean         @default(false)
+  category          String?
+  /// regras de divulgação que o afiliado aceita (ex.: proibido anunciar com a marca)
+  affiliate_rules   String?
+  /// retirado da vitrine automaticamente (reembolso/chargeback alto) ou pela equipe
+  marketplace_delisted_at DateTime?  @db.Timestamptz
+  marketplace_delisted_reason String?
   published_at      DateTime?        @db.Timestamptz
   deleted_at        DateTime?        @db.Timestamptz
   created_at        DateTime         @default(now()) @db.Timestamptz
@@ -222,6 +230,7 @@ model products {
   files     product_files[]
 
   @@index([workspace_id])
+  @@index([marketplace_listed, category])
 }
 
 enum BillingType {
@@ -267,6 +276,8 @@ model offers {
   pix_expiration_min   Int              @default(30)
   boleto_due_days      Int              @default(3)
   thank_you_url        String?
+  /// comissão de afiliado desta oferta (vazio = a do produto)
+  affiliate_commission_bps Int?
   /// Funil pós-compra (Fase 2): oferta mostrada na página de obrigado; downsell se o comprador recusar
   upsell_offer_id      String?          @db.Uuid
   upsell_headline      String?
@@ -720,10 +731,15 @@ model affiliations {
   affiliate_user_id      String   @db.Uuid
   code                   String   @unique
   status                 String   @default("pending") // pending | active | blocked
+  /// como o afiliado pretende divulgar (pedido pela vitrine)
+  message                String?
+  source                 String   @default("invite") // invite | marketplace
+  decided_at             DateTime? @db.Timestamptz
   created_at             DateTime @default(now()) @db.Timestamptz
   updated_at             DateTime @updatedAt @db.Timestamptz
 
   @@unique([product_id, affiliate_workspace_id])
+  @@index([affiliate_workspace_id])
 }
 
 model affiliate_clicks {
@@ -988,4 +1004,18 @@ model risk_alerts {
   created_at      DateTime  @default(now()) @db.Timestamptz
 
   @@index([acknowledged_at, created_at])
+}
+
+/// Materiais de divulgação que o produtor deixa para os afiliados ativos
+model affiliate_materials {
+  id         String   @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  product_id String   @db.Uuid
+  kind       String // link | text
+  title      String
+  url        String?
+  body       String?
+  position   Int      @default(0)
+  created_at DateTime @default(now()) @db.Timestamptz
+
+  @@index([product_id])
 }

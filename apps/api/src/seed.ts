@@ -64,7 +64,9 @@ async function main() {
     product = await prisma.products.create({ data: {
       workspace_id: ws.id, type: 'course', name: 'Curso de Confeitaria Lucrativa', description: 'Aprenda a fazer bolos que vendem e a precificar do jeito certo.',
       moderation_status: 'approved', published_at: new Date(), affiliation_enabled: true, affiliate_commission_bps: 4000,
+      marketplace_listed: true, category: 'culinaria', affiliate_rules: 'Não prometa renda garantida. Não use a marca “Confeitaria Lucrativa” em anúncios de busca.',
     } });
+    await prisma.affiliate_materials.create({ data: { product_id: product.id, kind: 'text', title: 'Texto para stories', body: 'Quer vender bolo de casa e saber quanto cobrar? O Curso de Confeitaria Lucrativa ensina do zero. Link na bio!' } });
     const m1 = await prisma.course_modules.create({ data: { product_id: product.id, title: 'Primeiros passos', position: 0 } });
     const m2 = await prisma.course_modules.create({ data: { product_id: product.id, title: 'Precificação', position: 1 } });
     const lessons = [

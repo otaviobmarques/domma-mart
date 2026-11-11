@@ -45,7 +45,7 @@ export class JobsService implements OnApplicationBootstrap {
     q.register('reconcile.daily', () => this.reconcile());
     q.register('transfers.poll', () => this.pollTransfers());
     q.register('privacy.due', async () => { await this.privacy.runDue(); });
-    q.register('risk.producers', async () => { await this.risk.scanProducers(); }); // RN-55
+    q.register('risk.producers', async () => { await this.risk.scanProducers(); await this.risk.scanMarketplace(); }); // RN-55 + vitrine
     q.register('withdrawal.retry', (d: { id: string; attempt: number }) => this.finance.retryTransfer(d.id, d.attempt));
     q.startWorker();
     if (process.env.DISABLE_CRON !== '1') {
