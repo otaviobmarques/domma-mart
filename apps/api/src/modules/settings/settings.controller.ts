@@ -40,6 +40,8 @@ export class SettingsController {
     if (!c.totpEnabled) throw new AppError('TWO_FACTOR_REQUIRED'); // 11.2: 2FA obrigatório para gerir equipe
     const u = await this.prisma.users.findUnique({ where: { email: d.email.toLowerCase() } });
     if (!u) throw new AppError('VALIDATION_ERROR', { fields: { email: 'Peça para essa pessoa criar uma conta Domma Mart primeiro.' } });
+    // e-mail confirmado: quem cadastrou o e-mail de outra pessoa antes dela não ganha acesso à equipe
+    if (!u.email_verified_at) throw new AppError('VALIDATION_ERROR', { fields: { email: 'Essa pessoa ainda não confirmou o e-mail da conta. Peça para ela clicar no link que enviamos.' } });
     const m = await this.prisma.memberships.upsert({ where: { user_id_workspace_id: { user_id: u.id, workspace_id: c.workspaceId } }, create: { user_id: u.id, workspace_id: c.workspaceId, role: 'collaborator', permissions: d.permissions }, update: { permissions: d.permissions } });
     await this.audit.log({ actorId: c.userId, action: 'team.set', target: `workspace:${c.workspaceId}`, after: { user: u.id, permissions: d.permissions } });
     return toJSON(m);

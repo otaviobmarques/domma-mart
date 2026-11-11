@@ -28,7 +28,10 @@ async function req(method, path, body, who, headers = {}) {
   const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = t; }
   return { status: r.status, body: j };
 }
-await req('POST', '/v1/auth/login', { email: 'produtora@demo.com', password: 'Domma@Mart2026' }, 'prod');
+// produtora tem verificação em duas etapas: PROD_TOTP = segredo impresso no seed
+const { createHmac } = await import('node:crypto');
+const totp = (secret) => { const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = 0, v = 0; const out = []; for (const ch of secret) { v = (v << 5) | A.indexOf(ch); bits += 5; if (bits >= 8) { out.push((v >>> (bits - 8)) & 255); bits -= 8; } } const buf = Buffer.alloc(8); buf.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000))); const h = createHmac('sha1', Buffer.from(out)).update(buf).digest(); const o = h[h.length - 1] & 15; return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1e6).padStart(6, '0'); };
+await req('POST', '/v1/auth/login', { email: 'produtora@demo.com', password: 'Domma@Mart2026', otp: process.env.PROD_TOTP ? totp(process.env.PROD_TOTP) : undefined }, 'prod');
 await req('POST', '/v1/auth/login', { email: 'afiliado@demo.com', password: 'Domma@Mart2026' }, 'outro');
 const host = 'pay.loja-teste.com.br';
 

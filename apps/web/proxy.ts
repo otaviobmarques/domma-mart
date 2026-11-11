@@ -51,6 +51,11 @@ export async function proxy(req: NextRequest) {
 
   // a API confere que a oferta pertence ao dono deste domínio
   const headers = edgeHeaders(req, host);
+  // área do comprador (login, compras, cursos) fica no endereço principal: a sessão não pode viver num domínio do produtor
+  const MAIN_URL = process.env.APP_URL || (MAIN[0] ? `https://${MAIN[0]}` : '');
+  if (MAIN_URL && ['/minhas-compras', '/curso', '/cursos', '/certificado'].some(p => pathname === p || pathname.startsWith(p + '/'))) {
+    return NextResponse.redirect(new URL(pathname + req.nextUrl.search, MAIN_URL), 307);
+  }
   if (BUYER_PREFIXES.some(p => pathname === p.replace(/\/$/, '') || pathname.startsWith(p))) return NextResponse.next({ request: { headers } });
   const slug = /^\/([A-Za-z0-9]{3,40})\/?$/.exec(pathname)?.[1];
   if (slug && !PANEL_ROUTES.has(slug.toLowerCase())) {
@@ -58,7 +63,7 @@ export async function proxy(req: NextRequest) {
     url.pathname = `/pay/${slug}`;
     return NextResponse.rewrite(url, { request: { headers } });
   }
-  if (pathname === '/') return NextResponse.rewrite(new URL('/minhas-compras/entrar', req.url), { request: { headers } });
+  if (pathname === '/') return MAIN_URL ? NextResponse.redirect(new URL('/minhas-compras/entrar', MAIN_URL), 307) : NextResponse.rewrite(new URL('/minhas-compras/entrar', req.url), { request: { headers } });
   return NextResponse.rewrite(new URL('/dominio-nao-configurado', req.url));
 }
 

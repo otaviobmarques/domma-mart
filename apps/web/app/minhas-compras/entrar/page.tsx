@@ -15,7 +15,16 @@ export default function Entrar() {
 
   // abrir o link mágico
   useEffect(() => {
-    const token = new URLSearchParams(location.search).get('token');
+    // vindo da página de obrigado num domínio de produtor: acesso direto da compra, aberto aqui no endereço principal
+    const q = new URLSearchParams(location.search);
+    const ot = q.get('ot');
+    if (ot) {
+      const v = q.get('volta'); const dest = v && v.startsWith('/') && !v.startsWith('//') ? v : '/minhas-compras';
+      setBusy(true);
+      post('/v1/customer/auth/order-login', { token: ot }).then(() => location.replace(dest)).catch(() => { setBusy(false); setErr('Este acesso expirou. Peça um link por e-mail abaixo.'); });
+      return;
+    }
+    const token = q.get('token');
     if (!token) return;
     setBusy(true);
     post('/v1/customer/auth/verify', { token }).then(() => location.replace('/minhas-compras')).catch((e: ApiError) => { setBusy(false); setErr(e.code === 'AUTH_LINK_EXPIRED' ? 'Este link expirou. Peça um novo.' : e.title); history.replaceState(null, '', '/minhas-compras/entrar'); });

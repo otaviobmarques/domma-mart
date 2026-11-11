@@ -129,6 +129,16 @@ describe('PagarmeGateway', () => {
     expect(r).toEqual({ refundId: 'tran_9', status: 'done' });
   });
 
+  it('saque: recusa definitiva (4xx) é diferente de resposta incerta (5xx/tempo esgotado)', async () => {
+    const { GatewayRefusal } = await import('./gateway.types');
+    const refuse = new PagarmeGateway(fakeFetch(() => ({ status: 422, json: { message: 'saldo insuficiente' } })).f);
+    await expect(refuse.transfer({ subaccountId: 'rp_X', amountCents: 1n, idempotencyKey: 'a' })).rejects.toBeInstanceOf(GatewayRefusal);
+    const unsure = new PagarmeGateway(fakeFetch(() => ({ status: 502, json: {} })).f);
+    const e = await unsure.transfer({ subaccountId: 'rp_X', amountCents: 1n, idempotencyKey: 'b' }).catch(x => x);
+    expect(e).toBeInstanceOf(Error);
+    expect(e).not.toBeInstanceOf(GatewayRefusal);
+  });
+
   it('saque: transferência do recebedor e consulta de estado', async () => {
     const { f, calls } = fakeFetch(c => ({ json: c.method === 'POST' ? { id: 777, status: 'pending_transfer' } : { id: 777, status: 'transferred' } }));
     const g = new PagarmeGateway(f);

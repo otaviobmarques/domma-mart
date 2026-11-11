@@ -30,7 +30,7 @@ import { DashboardController } from './modules/dashboard/dashboard.controller';
 import { KycController } from './modules/kyc/kyc.controller';
 import { AffiliatesController } from './modules/affiliates/affiliates.controller';
 import { SettingsController } from './modules/settings/settings.controller';
-import { AdminController, DevController } from './modules/admin/admin.controller';
+import { AdminController, DevController, AdminOutboxController } from './modules/admin/admin.controller';
 import { HealthController } from './health.controller';
 import { GoogleAuthController } from './modules/auth/google.controller';
 import { AdjustmentsController } from './modules/adjustments/adjustments.controller';
@@ -49,7 +49,7 @@ function gatewayFactory() {
   controllers: [
     HealthController, CheckoutController, WebhooksController, SandboxController, AuthController, CustomerController, OptOutController,
     ProductsController, MembersController, FilesController, DashboardController, KycController, AffiliatesController, SettingsController,
-    AdminController, DevController, DomainsController, AdjustmentsController, GoogleAuthController, PrivacyController,
+    AdminController, DevController, AdminOutboxController, DomainsController, AdjustmentsController, GoogleAuthController, PrivacyController,
   ],
   providers: [
     PrismaService, AuditService, StorageService, QueueService, NotifyService, LedgerService, OrdersService, CheckoutService, JobsService, FinanceService, PrivacyService,

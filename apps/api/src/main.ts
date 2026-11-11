@@ -17,12 +17,25 @@ import { edgeGuard } from './http/edge';
 
 (BigInt.prototype as any).toJSON = function () { return Number(this); };
 
+/** Em produção, a API não sobe com configuração insegura (revisão de segurança, item M5). */
+function assertProductionConfig() {
+  if (process.env.NODE_ENV !== 'production') return;
+  const problems: string[] = [];
+  if (!process.env.EDGE_SECRET) problems.push('EDGE_SECRET (acesso só pelo site)');
+  if (!process.env.TURNSTILE_SECRET) problems.push('TURNSTILE_SECRET (proteção contra robôs no checkout)');
+  if ((process.env.GATEWAY_PROVIDER || 'sandbox') === 'sandbox') problems.push('GATEWAY_PROVIDER real (sandbox não processa dinheiro)');
+  if (!process.env.RESEND_API_KEY) problems.push('RESEND_API_KEY (sem ele, links e códigos de acesso iriam para o log)');
+  if (process.env.DEV_TOOLS === '1') problems.push('DEV_TOOLS precisa estar desligado');
+  if (process.env.SEED_DEMO === '1') problems.push('SEED_DEMO precisa estar desligado');
+  if (problems.length) { console.error(`[segurança] configuração de produção incompleta:\n - ${problems.join('\n - ')}`); process.exit(1); }
+}
+
 async function bootstrap() {
+  assertProductionConfig();
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true, bodyParser: false, logger: ['log', 'warn', 'error'] });
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.use(edgeGuard); // só o site (Vercel) acessa a API — ver http/edge.ts
-  if (process.env.NODE_ENV === 'production' && !process.env.EDGE_SECRET) console.warn('[segurança] EDGE_SECRET não definido: a API confia em X-Forwarded-For e aceita acesso direto');
   app.use(cookieParser());
   // partes de upload chegam como binário
   app.use(/^\/v1\/uploads\/[^/]+\/parts\/\d+$/, express.raw({ type: '*/*', limit: '9mb' }));

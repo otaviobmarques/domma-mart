@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma.service';
 import { GATEWAY, GatewayAdapter } from '../gateway/gateway.types';
+import { gatewaySplit } from '../gateway/split';
 import { AppError, ErrorCode } from '../../common/errors';
 import { computeFee, computeSplit, installmentPlan, installmentOptions, applyCoupon, FEES, Method } from '../../domain/money';
 import { isValidDocument, isValidName, isValidEmailFormat, isDisposableEmail, normalizeBRMobile, onlyDigits } from '../../domain/validators';
@@ -212,10 +213,12 @@ export class CheckoutService {
     });
 
     // Comprador (único por plataforma — 21.8)
+    // Comprador já cadastrado: o checkout NÃO muda nome, CPF nem telefone dele. Quem digita o e-mail de outra
+    // pessoa não prova que é dona dele, e trocar o telefone permitiria entrar na conta pelo código do WhatsApp.
     const customer = await this.prisma.customers.upsert({
       where: { email },
       create: { email, name: c.name.trim(), document_enc: encrypt(doc), document_hash: docHash, phone_enc: encrypt(phone!), phone_hash: blindIndex(phone!) },
-      update: { name: c.name.trim(), document_enc: encrypt(doc), document_hash: docHash, phone_enc: encrypt(phone!), phone_hash: blindIndex(phone!) },
+      update: {},
     });
 
     const now = Date.now();
@@ -234,8 +237,13 @@ export class CheckoutService {
         },
       });
       await tx.order_events.create({ data: { order_id: o.id, to_status: 'created', event: 'order.created', data: { method: body.method } } });
-      if (coupon) await tx.coupons.update({ where: { id: coupon.id }, data: { uses: { increment: 1 } } });
-      if (affiliation) await this.bindAffiliate(tx, offer.product_id, affiliation.id, docHash, email, offer.product.affiliate_cookie_days);
+      if (coupon) {
+        // incremento condicional: pedidos em paralelo não passam do limite de usos do cupom
+        const used = await tx.coupons.updateMany({ where: { id: coupon.id, OR: [{ max_uses: null }, { uses: { lt: coupon.max_uses ?? 0 } }] }, data: { uses: { increment: 1 } } });
+        if (used.count !== 1) throw new AppError('COUPON_INVALID', { fields: { coupon_code: 'Este cupom esgotou.' } });
+      }
+      // o vínculo comprador↔afiliado só é gravado quando a compra é paga (OrdersService.markPaid):
+      // pedido não pago não pode "reservar" compradores para um afiliado
       return o;
     });
 
@@ -377,13 +385,6 @@ export class CheckoutService {
     return affiliation;
   }
 
-  private async bindAffiliate(tx: any, productId: string, affiliationId: string, docHash: string, email: string, days: number) {
-    const expires_at = new Date(Date.now() + days * 86400000);
-    for (const key of [`doc:${docHash}`, `email:${blindIndex(email)}`]) {
-      await tx.affiliate_bindings.upsert({ where: { product_id_customer_key: { product_id: productId, customer_key: key } }, create: { product_id: productId, customer_key: key, affiliation_id: affiliationId, expires_at }, update: { affiliation_id: affiliationId, expires_at } });
-    }
-  }
-
   /** Gera novo Pix no mesmo pedido (RN-13, tela 19.2). */
   async renewPix(orderId: string) {
     const order = await this.prisma.orders.findUnique({ where: { id: orderId }, include: { items: true } });
@@ -397,7 +398,7 @@ export class CheckoutService {
     const charge = await this.gateway.createCharge({
       idempotencyKey: `charge:${orderId}:${Date.now()}`, orderId, method: 'pix', amountCents: order.total_cents, installments: 1, description: offer.product.name,
       customer: { name: customer.name, email: customer.email, document: decrypt(customer.document_enc), phone: decrypt(customer.phone_enc) }, pixExpiresAt,
-      split: splits.map(s => ({ kind: s.beneficiary_type, amountCents: s.amount_cents, subaccountId: null })),
+      split: await gatewaySplit(this.prisma, splits), // mesma divisão do pedido, com a subconta de cada um
     });
     const payment = await this.prisma.payments.create({ data: { order_id: orderId, provider: this.gateway.name, provider_charge_id: charge.chargeId, method: 'pix', status: 'pending', raw_status: charge.rawStatus, pix_qr: charge.pix!.qrDataUrl, pix_copy_paste: charge.pix!.copyPaste, pix_expires_at: pixExpiresAt } });
     await this.prisma.$transaction(async (tx) => {

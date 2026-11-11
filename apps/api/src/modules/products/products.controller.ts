@@ -117,8 +117,11 @@ export class ProductsController {
     if (d.service_url === '') data.service_url = null;
     const p = await this.prisma.products.update({ where: { id }, data });
     if (d.guarantee_days) await this.prisma.offers.updateMany({ where: { product_id: id }, data: { guarantee_days: d.guarantee_days } });
-    if (d.name && p.moderation_status === 'approved' && moderationFlags(d.name).length) {
-      await this.prisma.products.update({ where: { id }, data: { moderation_status: 'in_review', moderation_notes: `Termos: ${moderationFlags(d.name).join(', ')}` } });
+    // nome ou descrição alterados depois da aprovação passam de novo pela análise automática
+    const changed = [d.name, d.description].filter(Boolean).join(' ');
+    const flags = changed ? moderationFlags(changed) : [];
+    if (p.moderation_status === 'approved' && flags.length) {
+      await this.prisma.products.update({ where: { id }, data: { moderation_status: 'in_review', moderation_notes: `Termos: ${flags.join(', ')}` } });
     }
     return toJSON(p);
   }

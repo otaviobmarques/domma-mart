@@ -6,7 +6,7 @@ import { Card, Pill, Logo } from '@/components/ui';
 /** Só em desenvolvimento: mensagens que seriam enviadas por e-mail/WhatsApp. */
 export default function Outbox() {
   const [rows, setRows] = useState<any[]>([]);
-  useEffect(() => { const l = () => get('/v1/dev/outbox').then(setRows).catch(() => {}); l(); const t = setInterval(l, 3000); return () => clearInterval(t); }, []);
+  useEffect(() => { const l = () => get('/v1/dev/outbox').catch(() => get('/v1/admin/outbox')).then(setRows).catch(() => {}); l(); const t = setInterval(l, 3000); return () => clearInterval(t); }, []);
   const linkify = (s: string) => s.split(/(https?:\/\/\S+)/g).map((p, i) => /^https?:/.test(p) ? <a key={i} href={p.replace(/[.,]$/, '')} className="break-all font-semibold text-action underline">{p}</a> : p);
   return (
     <main className="mx-auto max-w-3xl px-4 py-8"><Logo /><h1 className="mt-4 text-[22px] font-extrabold">Caixa de saída (desenvolvimento)</h1><p className="text-ink-mute">E-mails e WhatsApp que seriam enviados. Configure RESEND_API_KEY e DOMMA_CHAT_URL para envio real.</p>

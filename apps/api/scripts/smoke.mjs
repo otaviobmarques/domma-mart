@@ -24,6 +24,13 @@ function totp(secret) {
   const h = createHmac('sha1', Buffer.from(out)).update(buf).digest(); const o = h[h.length - 1] & 15;
   return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1e6).padStart(6, '0');
 }
+/** Login com verificação em duas etapas: senha → pede código → senha + código. */
+async function login(email, password, jarName, secret) {
+  const a = await req('POST', '/v1/auth/login', { email, password }, { cookie: jarName });
+  if (a.status !== 200 || !a.body.needs_otp) return a;
+  if (!secret) return { status: 0, body: { needs_otp: true } };
+  return req('POST', '/v1/auth/login', { email, password, otp: totp(secret) }, { cookie: jarName });
+}
 const buyer = (n) => ({ name: 'Maria Souza', email: `maria.${n}.${Date.now()}@example.com`, phone: '(31) 99999-0000', document: '529.982.247-25' });
 const cardToken = (num) => {
   const map = { '4000000000000002': 'decline', '4000000000009995': 'funds' };
@@ -61,8 +68,14 @@ const again = (await req('GET', `/v1/orders/${o1.body.order_id}?t=${t}`)).body;
 ok(again.fire_purchase === false, 'Purchase não dispara de novo ao recarregar');
 
 console.log('\n2) Produtora: vendas, divisão e saldo');
-const lp = await req('POST', '/v1/auth/login', { email: 'produtora@demo.com', password: 'Domma@Mart2026' }, { cookie: 'prod' });
-ok(lp.status === 200, 'login da produtora');
+const lp0 = await req('POST', '/v1/auth/login', { email: 'produtora@demo.com', password: 'Domma@Mart2026' }, { cookie: 'p0' });
+ok(lp0.status === 200 && lp0.body.needs_otp === true && !jar.p0?.includes('dm_session'), 'com 2FA ativa, só a senha não abre a sessão');
+if (process.env.PROD_TOTP) {
+  const bad2 = await req('POST', '/v1/auth/login', { email: 'produtora@demo.com', password: 'Domma@Mart2026', otp: totp(process.env.PROD_TOTP) === '000000' ? '111111' : '000000' }, { cookie: 'p0' });
+  ok(bad2.status === 422 && bad2.body.code === 'OTP_INVALID' && !jar.p0?.includes('dm_session'), 'código errado é recusado');
+}
+const lp = await login('produtora@demo.com', 'Domma@Mart2026', 'prod', process.env.PROD_TOTP);
+ok(lp.status === 200 && lp.body.ok === true, 'login da produtora com senha + código');
 const det = (await req('GET', `/v1/orders/${o1.body.order_id}/detail`, null, { cookie: 'prod' })).body;
 const sum = det.splits.reduce((s, x) => s + x.amount_cents, 0);
 ok(sum === det.total_cents, `divisão soma o total (${det.splits.map(s => s.type + ':' + s.amount_cents).join(', ')})`);
@@ -123,8 +136,8 @@ else {
 }
 
 console.log('\n6) Ajuste manual de saldo com 2 aprovadores (RN-38)');
-const la = await req('POST', '/v1/auth/login', { email: 'admin@dommamart.com', password: 'Domma@Mart2026' }, { cookie: 'adm' });
-const lf = await req('POST', '/v1/auth/login', { email: 'financeiro@dommamart.com', password: 'Domma@Mart2026' }, { cookie: 'fin' });
+const la = await login('admin@dommamart.com', process.env.ADMIN_PASSWORD || 'Domma@Mart2026', 'adm', process.env.ADMIN_TOTP);
+const lf = await login('financeiro@dommamart.com', 'Domma@Mart2026', 'fin', process.env.FIN_TOTP);
 if (la.status !== 200 || lf.status !== 200) { ok(false, 'login do admin e do financeiro'); }
 else {
   const me = (await req('GET', '/v1/auth/me', null, { cookie: 'prod' })).body;
@@ -151,8 +164,10 @@ else {
 
 console.log('\n7) Login por usuário e regra de senha');
 const adminPw = process.env.ADMIN_PASSWORD || 'Domma@Mart2026';
-ok((await req('POST', '/v1/auth/login', { email: 'Admin', password: adminPw })).status === 200, 'back-office entra com o usuário "Admin"');
-ok((await req('POST', '/v1/auth/login', { email: 'admin', password: adminPw })).status === 200, 'usuário não diferencia maiúsculas');
+ok((await req('POST', '/v1/auth/login', { email: 'Admin', password: adminPw })).body.needs_otp === true, 'back-office aceita o usuário "Admin" (e pede o código do aplicativo)');
+ok((await req('POST', '/v1/auth/login', { email: 'admin', password: adminPw })).body.needs_otp === true, 'usuário não diferencia maiúsculas');
+const noOtpAdmin = await req('POST', '/v1/auth/login', { email: 'Admin', password: adminPw }, { cookie: 'admx' });
+ok((await req('GET', '/v1/admin/overview', null, { cookie: 'admx' })).status === 401, 'back-office não abre só com a senha');
 ok((await req('POST', '/v1/auth/login', { email: 'Admin', password: 'senha-errada' })).status === 401, 'senha errada com usuário é recusada');
 const su = (pw) => req('POST', '/v1/auth/signup', { name: 'Teste Senha', email: `senha.${pw.length}.${Date.now()}@example.com`, phone: '(31) 99999-0000', password: pw, accept_terms: true });
 const s8 = await su('Ab#45678');
@@ -239,6 +254,57 @@ if (la.status === 200) {
   ok((await req('POST', `/v1/admin/privacy/${corr.body.id}/decision`, { decision: 'done', resolution: 'Nome corrigido no cadastro.' }, { cookie: 'adm' })).body.status === 'done', 'correção respondida');
   ok((await req('GET', '/v1/admin/privacy', null, { cookie: 'prod' })).status === 403, 'produtor não acessa a fila da equipe');
 }
+console.log('\n10) Conta do comprador não pode ser tomada pelo checkout');
+const victim = buyer(20);
+const vo = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: victim, method: 'pix' }, { headers: { 'idempotency-key': randomUUID() } });
+ok(vo.status === 201, 'vítima tem cadastro de comprador');
+// invasor usa o e-mail da vítima com o próprio telefone e outro CPF
+const atk = { ...victim, name: 'Invasor Teste', phone: '(31) 98765-4321', document: '390.533.447-05' };
+const ao = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: atk, method: 'pix' }, { headers: { 'idempotency-key': randomUUID() } });
+ok(ao.status === 201, 'checkout com e-mail de outra pessoa ainda funciona (a compra é de quem paga)');
+const before10 = (await req('GET', '/v1/dev/outbox')).body.filter(n => n.template === 'otp_code').length;
+await req('POST', '/v1/customer/auth/otp', { phone: atk.phone });
+const after10 = (await req('GET', '/v1/dev/outbox')).body.filter(n => n.template === 'otp_code').length;
+ok(after10 === before10, 'telefone do invasor não foi gravado na conta da vítima (nenhum código enviado)');
+const at = new URL('http://x' + ao.body.next.url).searchParams.get('t');
+await req('POST', `/v1/dev/sandbox/orders/${ao.body.order_id}/pay`, { t: at });
+let th; for (let i = 0; i < 20; i++) { await sleep(300); th = (await req('GET', `/v1/orders/${ao.body.order_id}?t=${at}`)).body; if (th.status === 'paid') break; }
+ok(th.status === 'paid' && th.login_token === null && th.access_by_email === true, 'pedido pago com e-mail de conta existente não dá login direto (acesso só pelo link do e-mail)');
+const fresh = buyer(21);
+const fo = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: fresh, method: 'pix' }, { headers: { 'idempotency-key': randomUUID() } });
+const ft = new URL('http://x' + fo.body.next.url).searchParams.get('t');
+await req('POST', `/v1/dev/sandbox/orders/${fo.body.order_id}/pay`, { t: ft });
+let fth; for (let i = 0; i < 20; i++) { await sleep(300); fth = (await req('GET', `/v1/orders/${fo.body.order_id}?t=${ft}`)).body; if (fth.status === 'paid') break; }
+ok(fth.status === 'paid' && typeof fth.login_token === 'string', 'primeira compra de um e-mail novo continua com acesso direto');
+
+console.log('\n11) Correções da revisão de segurança');
+// M1: pedido NÃO pago com código de afiliado não "reserva" o comprador para ele
+const m1 = { ...buyer(30), document: '111.444.777-35' }; // CPF sem vínculo anterior com afiliado
+await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: m1, method: 'pix', affiliate_code: 'bruno' }, { headers: { 'idempotency-key': randomUUID() } });
+const m1b = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: m1, method: 'pix' }, { headers: { 'idempotency-key': randomUUID() } });
+const m1t = new URL('http://x' + m1b.body.next.url).searchParams.get('t');
+await req('POST', `/v1/dev/sandbox/orders/${m1b.body.order_id}/pay`, { t: m1t });
+await sleep(1200);
+const m1d = (await req('GET', `/v1/orders/${m1b.body.order_id}/detail`, null, { cookie: 'prod' })).body;
+ok(m1d.splits && !m1d.splits.some(s => s.type === 'affiliate'), 'compra direta não paga comissão a afiliado que só criou um pedido não pago');
+// L1: convite de equipe exige e-mail confirmado
+const unv = `nao.confirmado.${Date.now()}@example.com`;
+await req('POST', '/v1/auth/signup', { name: 'Sem Confirmar', email: unv, phone: '(31) 99999-0000', password: 'Senha@Forte2026', accept_terms: true });
+const inv = await req('POST', '/v1/settings/team', { email: unv, permissions: ['orders.view'] }, { cookie: 'prod' });
+ok(inv.status === 422 && /confirmou o e-mail/.test(JSON.stringify(inv.body)), 'equipe: e-mail não confirmado não pode ser adicionado');
+// L3: lead (dispara e-mails de recuperação) tem limite por e-mail
+const spam = `alvo.${Date.now()}@example.com`;
+let lastLead;
+for (let i = 0; i < 6; i++) lastLead = await req('POST', '/v1/public/checkout-leads', { offer_id: offer.offer_id, email: spam });
+ok(lastLead.status === 429, 'mais de 5 leads para o mesmo e-mail no dia são recusados');
+// L2: sessão do comprador não nasce no domínio próprio do produtor
+await req('POST', '/v1/customer/auth/magic-link', { email: b9.email });
+const ob11 = (await req('GET', '/v1/dev/outbox')).body;
+const ml11 = ob11.find(n => n.template === 'magic_link')?.body.match(/token=([\w-]+)/)?.[1];
+const onCustom = await req('POST', '/v1/customer/auth/verify', { token: ml11 }, { headers: { 'x-dm-host': 'pay.loja-qualquer.com.br' } });
+ok(onCustom.status === 403, 'login do comprador num domínio de produtor é recusado (só no endereço principal)');
+// M5: caixa de saída de teste não é pública sem DEV_TOOLS (aqui DEV_TOOLS=1); a do back-office exige admin
+ok((await req('GET', '/v1/admin/outbox')).status === 401, 'caixa de saída do back-office exige login');
 
 console.log(`\n${pass} ok, ${fail} falhas\n`);
 process.exit(fail ? 1 : 0);

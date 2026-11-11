@@ -1082,6 +1082,44 @@
         }
       }
     },
+    "/v1/admin/outbox": {
+      "get": {
+        "operationId": "AdminOutbox_outbox",
+        "tags": [
+          "admin"
+        ],
+        "summary": "outbox",
+        "description": "Acesso: admin (permissão audit.view).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/overview": {
       "get": {
         "operationId": "Admin_overview",
@@ -1752,6 +1790,50 @@
           "auth"
         ],
         "summary": "login",
+        "description": "Acesso: public.",
+        "security": [],
+        "parameters": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/login/2fa": {
+      "post": {
+        "operationId": "Auth_login2fa",
+        "tags": [
+          "auth"
+        ],
+        "summary": "login2fa",
         "description": "Acesso: public.",
         "security": [],
         "parameters": [],

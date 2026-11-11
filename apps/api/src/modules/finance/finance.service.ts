@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../infra/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
-import { GATEWAY, GatewayAdapter, BankAccount, RecipientProfile } from '../gateway/gateway.types';
+import { GATEWAY, GatewayAdapter, BankAccount, RecipientProfile, GatewayRefusal } from '../gateway/gateway.types';
+import { QueueService } from '../../infra/queue.service';
 import { AppError } from '../../common/errors';
 import { decrypt, encrypt, blindIndex } from '../../common/crypto';
 import { verifyTotp } from '../../common/totp';
@@ -17,7 +18,7 @@ export class FinanceService {
   private log = new Logger('Finance');
   constructor(
     private prisma: PrismaService, private ledger: LedgerService, private notify: NotifyService, private audit: AuditService,
-    @Inject(GATEWAY) private gateway: GatewayAdapter,
+    @Inject(GATEWAY) private gateway: GatewayAdapter, private queue: QueueService,
   ) {}
 
   async balance(workspaceId: string) {
@@ -179,12 +180,38 @@ export class FinanceService {
     });
     await this.audit.log({ actorId: userId, action: 'withdrawal.request', target: `withdrawal:${w.id}`, after: { amount: amount.toString() }, ipHash });
     try {
-      const t = await this.gateway.transfer({ subaccountId: ws.gateway_subaccount_id, pixKey: acct.pix_key_enc ? decrypt(acct.pix_key_enc) : undefined, amountCents: amount, idempotencyKey: `wd:${w.id}` });
-      await this.prisma.withdrawals.update({ where: { id: w.id }, data: { provider_transfer_id: t.transferId } });
+      await this.sendTransfer(w.id);
     } catch (e) {
-      await this.failWithdrawal(w.id, 'Falha ao enviar a transferência');
+      if (e instanceof GatewayRefusal) await this.failWithdrawal(w.id, 'Transferência recusada pelo banco');
+      else {
+        // tempo esgotado ou erro incerto: a transferência pode ter saído. Não devolve o saldo; tenta de novo com a
+        // mesma chave de idempotência (o gateway não duplica) até ter uma resposta definitiva.
+        this.log.warn(`saque ${w.id}: resposta incerta do gateway (${(e as Error).message}); nova tentativa agendada`);
+        await this.queue.addDelayed('withdrawal.retry', { id: w.id, attempt: 1 }, 120_000, `wdretry:${w.id}:1`);
+      }
     }
     return { withdrawal_id: w.id, status: 'processing' };
+  }
+
+  private async sendTransfer(withdrawalId: string) {
+    const w = await this.prisma.withdrawals.findUniqueOrThrow({ where: { id: withdrawalId } });
+    const ws = await this.prisma.workspaces.findUniqueOrThrow({ where: { id: w.workspace_id } });
+    const acct = await this.prisma.payout_accounts.findUnique({ where: { workspace_id: w.workspace_id } });
+    const pixKey = w.destination_enc && acct?.pix_key_enc ? decrypt(w.destination_enc) : undefined;
+    const t = await this.gateway.transfer({ subaccountId: ws.gateway_subaccount_id, pixKey, amountCents: w.amount_cents, idempotencyKey: `wd:${w.id}` });
+    await this.prisma.withdrawals.update({ where: { id: w.id }, data: { provider_transfer_id: t.transferId } });
+  }
+
+  /** Nova tentativa de um saque com resposta incerta (job withdrawal.retry). Depois de 6 tentativas, fica para a equipe. */
+  async retryTransfer(id: string, attempt: number) {
+    const w = await this.prisma.withdrawals.findUnique({ where: { id } });
+    if (!w || w.status !== 'processing' || w.provider_transfer_id) return;
+    try { await this.sendTransfer(id); }
+    catch (e) {
+      if (e instanceof GatewayRefusal) return this.failWithdrawal(id, 'Transferência recusada pelo banco');
+      if (attempt >= 6) { this.log.error(`saque ${id}: sem resposta do gateway após ${attempt} tentativas — conferir manualmente`); return; }
+      await this.queue.addDelayed('withdrawal.retry', { id, attempt: attempt + 1 }, Math.min(3_600_000, 120_000 * 2 ** attempt), `wdretry:${id}:${attempt + 1}`);
+    }
   }
 
   async onTransfer(transferId: string, ok: boolean, reason?: string) {
