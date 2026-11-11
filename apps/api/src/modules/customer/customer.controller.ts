@@ -12,6 +12,7 @@ import * as rl from '../../infra/rate-limit';
 import { normalizeBRMobile, onlyDigits, isValidDocument } from '../../domain/validators';
 import { toJSON } from '../../http/json';
 import { cookieOpts } from '../auth/auth.controller';
+import { trustedHostHeader } from '../../http/edge';
 import { receiptPdf } from './receipt';
 import { GATEWAY, GatewayAdapter } from '../gateway/gateway.types';
 
@@ -21,7 +22,10 @@ const SESSION_MS = 30 * 86400000; // RN-82
 export class CustomerController {
   constructor(private prisma: PrismaService, private notify: NotifyService, private orders: OrdersService, @Inject(GATEWAY) private gateway: GatewayAdapter) {}
 
-  private async session(res: Response, customerId: string) {
+  private async session(res: Response, customerId: string, req?: R) {
+    // a sessão do comprador só nasce no endereço principal: no domínio próprio de um produtor o cookie ficaria
+    // num domínio que ele controla (poderia apontar o DNS para outro servidor e capturar a sessão)
+    if (req && trustedHostHeader(req as any)) throw new AppError('PERMISSION_DENIED', { title: 'Para entrar, use o endereço principal da Domma Mart.' });
     const t = randomToken(32);
     await this.prisma.customer_sessions.create({ data: { customer_id: customerId, token_hash: sha256(t), expires_at: new Date(Date.now() + SESSION_MS) } });
     res.cookie('dm_customer', t, cookieOpts(SESSION_MS));
@@ -63,7 +67,7 @@ export class CustomerController {
   }
 
   @Post('auth/verify') @Public() @HttpCode(200)
-  async verify(@Body() b: any, @Res({ passthrough: true }) res: Response) {
+  async verify(@Body() b: any, @Req() req: R, @Res({ passthrough: true }) res: Response) {
     const d = parse(z.union([z.object({ token: z.string().max(100) }), z.object({ phone: z.string().max(30), code: z.string().length(6) })]), b);
     let row;
     if ('token' in d) {
@@ -82,19 +86,19 @@ export class CustomerController {
     }
     const used = await this.prisma.customer_auth_tokens.updateMany({ where: { id: row.id, used_at: null }, data: { used_at: new Date() } });
     if (used.count !== 1) throw new AppError('AUTH_LINK_EXPIRED'); // uso único
-    await this.session(res, row.customer_id!);
+    await this.session(res, row.customer_id!, req);
     return { ok: true };
   }
 
   /** "Acessar meu curso" na página de obrigado (19.3). */
   @Post('auth/order-login') @Public() @HttpCode(200)
-  async orderLogin(@Body() b: any, @Res({ passthrough: true }) res: Response) {
+  async orderLogin(@Body() b: any, @Req() req: R, @Res({ passthrough: true }) res: Response) {
     const { token } = parse(z.object({ token: z.string().max(100) }), b);
     const row = await this.prisma.customer_auth_tokens.findUnique({ where: { token_hash: sha256(token) } });
     if (!row || row.kind !== 'order' || row.used_at || row.expires_at < new Date()) throw new AppError('AUTH_LINK_EXPIRED');
     const used = await this.prisma.customer_auth_tokens.updateMany({ where: { id: row.id, used_at: null }, data: { used_at: new Date() } });
     if (used.count !== 1) throw new AppError('AUTH_LINK_EXPIRED');
-    await this.session(res, row.customer_id!);
+    await this.session(res, row.customer_id!, req);
     return { ok: true };
   }
 

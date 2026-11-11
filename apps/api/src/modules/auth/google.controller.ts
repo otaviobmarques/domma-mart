@@ -95,6 +95,12 @@ export class GoogleAuthController {
         }
       }
       if (user.status !== 'active') return fail('conta_bloqueada');
+      if (user.totp_enabled_at) {
+        // 2FA ativa: o Google prova o e-mail, mas a sessão só abre com o código do aplicativo
+        res.clearCookie('dm_oauth', { path: '/v1/auth/google' });
+        const ticket = signToken({ mfa: user.id, exp: Date.now() + 5 * 60_000 });
+        return res.redirect(302, `${app}/entrar?mfa=${encodeURIComponent(ticket)}&volta=${encodeURIComponent(st.b)}`);
+      }
       const token = randomToken(32);
       const ua = String(req.headers['user-agent'] || '').slice(0, 300);
       const known = await this.prisma.sessions.findFirst({ where: { user_id: user.id, user_agent: ua } });

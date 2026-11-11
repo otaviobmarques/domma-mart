@@ -6,12 +6,13 @@ import { QueueService } from '../../infra/queue.service';
 import { NotifyService, render } from '../../infra/notify.service';
 import { OrdersService } from '../orders/orders.service';
 import { GATEWAY, GatewayAdapter, GatewayEvent } from '../gateway/gateway.types';
+import { gatewaySplit } from '../gateway/split';
 import { decrypt, blindIndex, hmacSign, randomToken, signToken } from '../../common/crypto';
 import { formatBRL, tierBpsFor } from '../../domain/money';
 import { maskEmail } from '../../domain/validators';
 import { urls } from '../../common/urls';
 import { FinanceService } from '../finance/finance.service';
-import { isPublicHttpUrl } from '../integrations/ssrf';
+import { safePost } from '../integrations/ssrf';
 
 const RETRY_MIN = [1, 5, 30, 120, 360, 1440]; // 22.7
 
@@ -40,6 +41,7 @@ export class JobsService implements OnApplicationBootstrap {
     q.register('fees.tiers', () => this.recomputeTiers());
     q.register('reconcile.daily', () => this.reconcile());
     q.register('transfers.poll', () => this.pollTransfers());
+    q.register('withdrawal.retry', (d: { id: string; attempt: number }) => this.finance.retryTransfer(d.id, d.attempt));
     q.startWorker();
     if (process.env.DISABLE_CRON !== '1') {
       await q.repeat('subscriptions.charge', '15 * * * *');
@@ -241,10 +243,8 @@ export class JobsService implements OnApplicationBootstrap {
     const sig = hmacSign(`${t}.${body}`, decrypt(ep.secret_enc));
     let status: number | null = null, error: string | null = null;
     try {
-      if (!(await isPublicHttpUrl(ep.url))) throw new Error('destino bloqueado (rede interna)'); // SSRF (11.5)
-      const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 10_000);
-      const r = await fetch(ep.url, { method: 'POST', redirect: 'manual', signal: ctrl.signal, headers: { 'Content-Type': 'application/json', 'User-Agent': 'DommaMart-Webhooks/1.0', 'X-DommaMart-Signature': `t=${t},v1=${sig}` }, body });
-      clearTimeout(to);
+      // SSRF (11.5): o IP é checado na própria conexão, sem seguir redirecionamento
+      const r = await safePost(ep.url, { 'Content-Type': 'application/json', 'User-Agent': 'DommaMart-Webhooks/1.0', 'X-DommaMart-Signature': `t=${t},v1=${sig}` }, body, 10_000);
       status = r.status;
       if (r.status < 200 || r.status >= 300) error = `HTTP ${r.status}`;
     } catch (e) { error = String((e as Error).message).slice(0, 300); }
@@ -284,11 +284,17 @@ export class JobsService implements OnApplicationBootstrap {
     const offer = await this.prisma.offers.findUniqueOrThrow({ where: { id: s.offer_id }, include: { product: { include: { workspace: true } } } });
     const c = await this.prisma.customers.findUniqueOrThrow({ where: { id: s.customer_id } });
     const first = await this.prisma.orders.findFirstOrThrow({ where: { subscription_id: s.id }, orderBy: { created_at: 'asc' }, include: { splits: true, items: true } });
+    // divisão da renovação: mesma proporção do primeiro pedido, enviada ao gateway com as subcontas
+    const { orderCode } = await import('../../common/crypto');
+    const ratio = (v: bigint) => (v * s.price_cents) / first.total_cents;
+    const splits = first.splits.map(sp => ({ beneficiary_type: sp.beneficiary_type, beneficiary_id: sp.beneficiary_id, amount_cents: ratio(sp.amount_cents), rule: sp.rule as any }));
+    const diff = s.price_cents - splits.reduce((a, b) => a + b.amount_cents, 0n);
+    splits.find(x => x.beneficiary_type === 'producer')!.amount_cents += diff;
     const charge = await this.gateway.createCharge({
       idempotencyKey: `sub:${s.id}:${s.current_period_end.getTime()}:${s.retry_count}`, orderId: s.id, method: 'card', amountCents: s.price_cents, installments: 1,
       description: offer.product.name, customer: { name: c.name, email: c.email, document: decrypt(c.document_enc), phone: decrypt(c.phone_enc) },
       savedCardRef: s.card_token_ref ?? undefined,
-      split: [],
+      split: await gatewaySplit(this.prisma, splits),
     });
     if (charge.status === 'declined') {
       const retry = s.retry_count + 1;
@@ -302,12 +308,6 @@ export class JobsService implements OnApplicationBootstrap {
       await this.notify.send({ channel: 'email', to: c.email, template: 'subscription_failed', workspaceId: s.workspace_id, vars: { produtor: offer.product.workspace.name, produto: offer.product.name, link: urls.customerArea() } });
       return;
     }
-    // cria pedido da renovação com a mesma divisão proporcional
-    const { orderCode } = await import('../../common/crypto');
-    const ratio = (v: bigint) => (v * s.price_cents) / first.total_cents;
-    const splits = first.splits.map(sp => ({ beneficiary_type: sp.beneficiary_type, beneficiary_id: sp.beneficiary_id, amount_cents: ratio(sp.amount_cents), rule: sp.rule as any }));
-    const diff = s.price_cents - splits.reduce((a, b) => a + b.amount_cents, 0n);
-    splits.find(x => x.beneficiary_type === 'producer')!.amount_cents += diff;
     const order = await this.prisma.orders.create({ data: {
       code: orderCode(), workspace_id: s.workspace_id, customer_id: s.customer_id, offer_id: s.offer_id, status: 'pending', method: 'card', installments: 1,
       subtotal_cents: s.price_cents, total_cents: s.price_cents, subscription_id: s.id, ip_hash: first.ip_hash, user_agent: 'renewal', idempotency_key: `renew:${s.id}:${s.current_period_end.getTime()}`,

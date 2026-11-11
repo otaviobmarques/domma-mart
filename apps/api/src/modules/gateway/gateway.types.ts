@@ -88,3 +88,6 @@ export interface GatewayAdapter {
 }
 
 export const GATEWAY = Symbol('GATEWAY');
+
+/** Recusa definitiva do gateway (dados inválidos, saldo insuficiente…). Qualquer outro erro é incerto: pode ter dado certo. */
+export class GatewayRefusal extends Error {}

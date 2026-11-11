@@ -67,8 +67,11 @@ export class CheckoutController {
   }
 
   @Post('v1/public/checkout-leads') @HttpCode(200)
-  async lead(@Body() b: any) {
+  async lead(@Body() b: any, @Req() req: R) {
     const d = parse(z.object({ offer_id: z.string().uuid(), email: z.string().max(200), name: z.string().max(120).optional(), phone: z.string().max(30).optional() }), b);
+    // limites: o lead dispara e-mails de recuperação, então não pode virar disparador de spam
+    await rl.limit(`lead:ip:${hashIp(clientIp(req))}`, 20, 3600);
+    await rl.limit(`lead:email:${blindIndex(d.email.trim().toLowerCase())}`, 5, 86400);
     return this.svc.saveLead(d.offer_id, d.email.trim().toLowerCase(), d.name, d.phone);
   }
 
@@ -153,7 +156,7 @@ export class CheckoutController {
 
   /** Página de obrigado (19.3). Purchase do Pixel uma única vez por pedido. */
   @Get('v1/orders/:id')
-  async thanks(@Param('id') id: string, @Query('t') t: string) {
+  async thanks(@Param('id') id: string, @Query('t') t: string, @Req() req: R) {
     orderFromToken(id, t);
     const o = await this.prisma.orders.findUniqueOrThrow({ where: { id }, include: { items: true, payments: { orderBy: { created_at: 'desc' }, take: 1 } } });
     const customer = await this.prisma.customers.findUniqueOrThrow({ where: { id: o.customer_id } });
@@ -164,19 +167,26 @@ export class CheckoutController {
       const r = await this.prisma.orders.updateMany({ where: { id, purchase_event_sent_at: null }, data: { purchase_event_sent_at: new Date() } });
       fire_purchase = r.count === 1;
     }
+    // Entrar direto da página de obrigado só no primeiro pedido do e-mail (cadastro criado por esta compra).
+    // Comprador que já existia entra pelo link mágico do e-mail: quem pagou não necessariamente é o dono da conta.
     let login_token: string | null = null;
-    if (o.status === 'paid') {
+    const earlier = o.status === 'paid' ? await this.prisma.orders.count({ where: { customer_id: o.customer_id, created_at: { lt: o.created_at } } }) : 1;
+    if (o.status === 'paid' && earlier === 0 && customer.created_at >= new Date(o.created_at.getTime() - 60_000)) {
       login_token = randomToken(32);
       await this.prisma.customer_auth_tokens.create({ data: { customer_id: o.customer_id, kind: 'order', token_hash: sha256(login_token), expires_at: new Date(Date.now() + 15 * 60_000) } });
     }
     const offer = await this.prisma.offers.findUniqueOrThrow({ where: { id: o.offer_id } });
     const p = o.payments[0];
+    // no domínio próprio do produtor, o login acontece no endereço principal (a sessão não pode nascer lá)
+    const onCustomDomain = !!requestHost(req);
+    const dest = main.type === 'course' || main.type === 'subscription' ? `/curso/${main.id}` : '/minhas-compras';
+    const login_url = login_token && onCustomDomain ? `${process.env.APP_URL || ''}/minhas-compras/entrar?ot=${login_token}&volta=${encodeURIComponent(dest)}` : null;
     return toJSON({
       order_id: o.id, code: o.code, status: o.status, method: o.method, total_cents: o.total_cents, installments: o.installments,
       email: customer.email, product: { id: main.id, name: main.name, type: main.type, service_url: main.service_url },
       items: o.items.map(i => ({ name: products.find(p => p.id === i.product_id)?.name, kind: i.kind, price_cents: i.price_cents })),
       boleto: o.method === 'boleto' ? { line: p?.boleto_line, url: p?.boleto_url, due_at: p?.boleto_due_at } : null,
-      thank_you_url: offer.thank_you_url, fire_purchase, login_token,
+      thank_you_url: offer.thank_you_url, fire_purchase, login_token: onCustomDomain ? null : login_token, login_url, access_by_email: o.status === 'paid' && !login_token,
       sandbox: this.gateway.name === 'sandbox' && o.status === 'pending' ? { charge_id: p?.provider_charge_id } : null,
     });
   }

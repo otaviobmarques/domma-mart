@@ -9,12 +9,13 @@ import { AuditService } from '../../infra/audit.service';
 import { Public, Producer, Ctx, ProducerCtx, Req as R, clientIp } from '../../http/context';
 import { parse, z } from '../../http/zod';
 import { AppError } from '../../common/errors';
-import { randomToken, sha256, encrypt, decrypt, hashIp } from '../../common/crypto';
+import { randomToken, sha256, encrypt, decrypt, hashIp, verifyToken } from '../../common/crypto';
 import { generateSecret, otpauthUrl, verifyTotp } from '../../common/totp';
 import * as rl from '../../infra/rate-limit';
 import { normalizeBRMobile } from '../../domain/validators';
 import { toJSON } from '../../http/json';
 import { GATEWAY, GatewayAdapter } from '../gateway/gateway.types';
+import { FinanceService } from '../finance/finance.service';
 import { Inject } from '@nestjs/common';
 
 const SESSION_DAYS = 7; // RN-82
@@ -41,7 +42,7 @@ export function cookieOpts(maxAgeMs: number) {
 
 @Controller('v1/auth')
 export class AuthController {
-  constructor(private prisma: PrismaService, private notify: NotifyService, private audit: AuditService, @Inject(GATEWAY) private gateway: GatewayAdapter) {}
+  constructor(private prisma: PrismaService, private notify: NotifyService, private audit: AuditService, private finance: FinanceService, @Inject(GATEWAY) private gateway: GatewayAdapter) {}
 
   private async startSession(res: Response, req: R, userId: string, kind = 'producer') {
     const token = randomToken(32);
@@ -105,7 +106,7 @@ export class AuthController {
 
   @Post('login') @Public() @HttpCode(200)
   async login(@Body() b: any, @Req() req: R, @Res({ passthrough: true }) res: Response) {
-    const d = parse(z.object({ email: z.string().max(200), password: z.string().max(200) }), b);
+    const d = parse(z.object({ email: z.string().max(200), password: z.string().max(200), otp: z.string().regex(/^\d{6}$/).optional() }), b);
     const login = d.email.trim();
     const ipHash = hashIp(clientIp(req));
     await rl.limit(`login:ip:${ipHash}`, 30, 900);
@@ -124,11 +125,33 @@ export class AuthController {
     }
     if (u.status !== 'active') throw new AppError('ACCOUNT_BLOCKED');
     await this.prisma.users.update({ where: { id: u.id }, data: { failed_logins: 0, locked_until: null } });
+    // verificação em duas etapas ativa: a senha sozinha não abre a sessão (código do aplicativo, com bloqueio após 5 erros)
+    if (u.totp_enabled_at) {
+      if (!d.otp) return { ok: false, needs_otp: true };
+      await this.finance.checkOtp(u.id, d.otp);
+    }
     const s = await this.startSession(res, req, u.id);
     if (s.newDevice && (await this.prisma.sessions.count({ where: { user_id: u.id } })) > 1) {
       await this.notify.send({ channel: 'email', to: u.email, template: 'new_login', vars: { dispositivo: s.ua.slice(0, 80) } });
     }
     return { ok: true, needs_2fa_setup: u.platform_role !== 'none' && !u.totp_enabled_at };
+  }
+
+  /** Segunda etapa do login com Google: o callback manda um bilhete de 5 min quando a conta tem 2FA. */
+  @Post('login/2fa') @Public() @HttpCode(200)
+  async login2fa(@Body() b: any, @Req() req: R, @Res({ passthrough: true }) res: Response) {
+    const d = parse(z.object({ ticket: z.string().max(600), otp: z.string().regex(/^\d{6}$/, 'Digite os 6 números do aplicativo.') }), b);
+    await rl.limit(`login2fa:ip:${hashIp(clientIp(req))}`, 20, 900);
+    const t = verifyToken<{ mfa: string }>(d.ticket);
+    if (!t?.mfa) throw new AppError('AUTH_LINK_EXPIRED', { title: 'O tempo para digitar o código acabou. Entre de novo.' });
+    const u = await this.prisma.users.findUnique({ where: { id: t.mfa } });
+    if (!u || u.status !== 'active' || !u.totp_enabled_at) throw new AppError('AUTH_LINK_EXPIRED');
+    await this.finance.checkOtp(u.id, d.otp);
+    const s = await this.startSession(res, req, u.id);
+    if (s.newDevice && (await this.prisma.sessions.count({ where: { user_id: u.id } })) > 1) {
+      await this.notify.send({ channel: 'email', to: u.email, template: 'new_login', vars: { dispositivo: s.ua.slice(0, 80) } });
+    }
+    return { ok: true };
   }
 
   @Post('logout') @Public() @HttpCode(200)
@@ -226,6 +249,8 @@ export class AuthController {
   async acceptCopro(@Ctx() c: ProducerCtx, @Param('id') id: string) {
     const cp = await this.prisma.coproductions.findUnique({ where: { id } });
     if (!cp || cp.invited_email.toLowerCase() !== c.email.toLowerCase() || cp.status !== 'invited') throw new AppError('NOT_FOUND');
+    const me = await this.prisma.users.findUniqueOrThrow({ where: { id: c.userId } });
+    if (!me.email_verified_at) throw new AppError('VALIDATION_ERROR', { title: 'Confirme seu e-mail para aceitar a sociedade.' });
     const ws = await this.prisma.workspaces.findUniqueOrThrow({ where: { id: c.workspaceId } });
     if (ws.kyc_status !== 'approved') throw new AppError('KYC_REQUIRED', { title: 'Confirme sua identidade para aceitar a sociedade.' });
     await this.prisma.coproductions.update({ where: { id }, data: { status: 'active', workspace_id: c.workspaceId } });

@@ -5,7 +5,7 @@ import { brl, methodLabel } from '@/lib/format';
 import { track } from '@/lib/pixels';
 import { Button, Card, Skeleton, Banner, Logo, CopyButton } from '@/components/ui';
 
-type Thanks = { order_id: string; code: string; status: string; method: string; total_cents: number; installments: number; email: string; product: { id: string; name: string; type: string; service_url: string | null }; items: { name: string; kind: string; price_cents: number }[]; boleto: { line: string; url: string; due_at: string } | null; thank_you_url: string | null; fire_purchase: boolean; login_token: string | null; sandbox: { charge_id: string } | null };
+type Thanks = { order_id: string; code: string; status: string; method: string; total_cents: number; installments: number; email: string; product: { id: string; name: string; type: string; service_url: string | null }; items: { name: string; kind: string; price_cents: number }[]; boleto: { line: string; url: string; due_at: string } | null; thank_you_url: string | null; fire_purchase: boolean; login_token: string | null; login_url?: string | null; access_by_email?: boolean; sandbox: { charge_id: string } | null };
 
 export default function Obrigado({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -32,6 +32,7 @@ export default function Obrigado({ params }: { params: Promise<{ id: string }> }
     if (d.product.type === 'service' && d.product.service_url) { window.open(d.product.service_url, '_blank'); return; }
     setBusy(true);
     try {
+      if (d.login_url) { location.href = d.login_url; return; } // domínio próprio: entra no endereço principal
       if (d.login_token) await post('/v1/customer/auth/order-login', { token: d.login_token });
       location.href = d.product.type === 'course' || d.product.type === 'subscription' ? `/curso/${d.product.id}` : '/minhas-compras';
     } catch { location.href = '/minhas-compras/entrar'; }
@@ -79,6 +80,7 @@ export default function Obrigado({ params }: { params: Promise<{ id: string }> }
           <div className="mt-2 flex justify-between border-t border-line pt-2 font-bold"><span>Total</span><span className="num">{brl(d.total_cents)}</span></div>
         </div>
         <Button size="xl" full className="mt-6" loading={busy} onClick={access}>{cta}</Button>
+        {d.access_by_email && d.product.type !== 'service' && <p className="mt-3 text-center text-[14px] text-ink-mute">Você já tem conta aqui. Se não estiver conectado, entre na sua área de cliente com o e-mail <b>{d.email}</b> — mandamos um link de acesso para ele.</p>}
       </Card>
       <Card className="mt-4">
         <p className="font-bold">Precisa de ajuda?</p>

@@ -39,6 +39,7 @@ jobs:
       STORAGE_DIR: ./storage
       SKIP_PWNED_CHECK: '1'
       DISABLE_CRON: '1'
+      DEV_TOOLS: '1' # caixa de saída pública só no CI e no desenvolvimento
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -70,6 +71,8 @@ jobs:
           node dist/main.js > api.log 2>&1 &
           for i in $(seq 1 60); do curl -sf localhost:4000/health && break; sleep 1; done
           export PROD_TOTP=$(grep 'produtora@demo.com' seed.txt | sed -E 's/.*TOTP: ([A-Z2-7]+).*/\1/')
+          export ADMIN_TOTP=$(grep 'admin@dommamart.com' seed.txt | sed -E 's/.*TOTP: ([A-Z2-7]+).*/\1/')
+          export FIN_TOTP=$(grep 'financeiro@dommamart.com' seed.txt | sed -E 's/.*TOTP: ([A-Z2-7]+).*/\1/')
           node scripts/smoke.mjs
       - name: Ponta a ponta com a Pagar.me (API falsa)
         working-directory: apps/api

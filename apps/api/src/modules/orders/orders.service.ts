@@ -1,3 +1,4 @@
+import { blindIndex } from '../../common/crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService, Tx } from '../../infra/prisma.service';
@@ -50,6 +51,20 @@ export class OrdersService {
   private flush(p: Pending) { for (const e of p) this.events.emit(e.name, e.payload); }
 
   /** Pagamento confirmado por webhook ou consulta ativa (RN-14). Idempotente (RN-31). */
+  /** Vínculo comprador↔afiliado (RN-70), gravado só com a compra paga, pelo prazo do cookie do produto. */
+  private async bindAffiliateOnPaid(tx: any, order: { customer_id: string; affiliate_workspace_id: string | null; items: { kind: string; product_id: string }[] }) {
+    if (!order.affiliate_workspace_id) return;
+    const productId = order.items.find(i => i.kind === 'main')!.product_id;
+    const product = await tx.products.findUniqueOrThrow({ where: { id: productId } });
+    const affiliation = await tx.affiliations.findFirst({ where: { product_id: productId, affiliate_workspace_id: order.affiliate_workspace_id, status: 'active' } });
+    if (!affiliation) return;
+    const c = await tx.customers.findUniqueOrThrow({ where: { id: order.customer_id } });
+    const expires_at = new Date(Date.now() + product.affiliate_cookie_days * 86400000);
+    for (const key of [`doc:${c.document_hash}`, `email:${blindIndex(c.email)}`]) {
+      await tx.affiliate_bindings.upsert({ where: { product_id_customer_key: { product_id: productId, customer_key: key } }, create: { product_id: productId, customer_key: key, affiliation_id: affiliation.id, expires_at }, update: { affiliation_id: affiliation.id, expires_at } });
+    }
+  }
+
   async markPaid(orderId: string, source: string) {
     const pending: Pending = [];
     await this.prisma.$transaction(async (tx) => {
@@ -62,6 +77,7 @@ export class OrdersService {
       const ok = await this.transition(tx, orderId, 'paid', 'payment.confirmed', { source }, pending);
       if (!ok) return;
       await tx.orders.update({ where: { id: orderId }, data: { paid_at: paidAt, guarantee_ends_at: guaranteeEnds } });
+      await this.bindAffiliateOnPaid(tx, order);
       await tx.payments.updateMany({ where: { order_id: orderId, status: { in: ['pending', 'authorized', 'expired'] } }, data: { status: 'paid', raw_status: 'PAID' } });
 
       // Ledger: entrada no gateway (débito) e créditos congelados na venda (RN-06), com prazos (RN-35)

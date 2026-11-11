@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { pixQrDataUrl } from './qr';
-import { GatewayAdapter, CreateChargeInput, ChargeResult, GatewayEvent, ChargeStatus, RecipientProfile, BankAccount, Address, SplitRule } from './gateway.types';
+import { GatewayRefusal, GatewayAdapter, CreateChargeInput, ChargeResult, GatewayEvent, ChargeStatus, RecipientProfile, BankAccount, Address, SplitRule } from './gateway.types';
 import { safeEqual } from '../../common/crypto';
 import { onlyDigits } from '../../domain/validators';
 
@@ -64,6 +64,8 @@ export class PagarmeGateway implements GatewayAdapter {
     try { json = text ? JSON.parse(text) : null; } catch { /* resposta não JSON */ }
     if (!r.ok) {
       const detail = json?.message || json?.errors ? JSON.stringify({ message: json?.message, errors: json?.errors }).slice(0, 500) : text.slice(0, 200);
+      // 4xx (exceto tempo esgotado, conflito e excesso de pedidos) = recusa definitiva; 5xx = incerto
+      if (r.status >= 400 && r.status < 500 && ![408, 409, 425, 429].includes(r.status)) throw new PagarmeRefusal(r.status, `${method} ${path} → ${r.status} ${detail}`);
       throw new PagarmeError(r.status, `${method} ${path} → ${r.status} ${detail}`);
     }
     return json as T;
@@ -188,7 +190,7 @@ export class PagarmeGateway implements GatewayAdapter {
       const ch = await this.call('GET', `/charges/${encodeURIComponent(chargeId)}`);
       return { status: PagarmeGateway.status(ch.status, ch.payment_method), rawStatus: String(ch.status).toUpperCase() };
     } catch (e) {
-      if (e instanceof PagarmeError && e.status === 404) return null;
+      if ((e instanceof PagarmeError || e instanceof PagarmeRefusal) && e.status === 404) return null;
       throw e;
     }
   }
@@ -297,6 +299,9 @@ export class PagarmeGateway implements GatewayAdapter {
 }
 
 export class PagarmeError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
+export class PagarmeRefusal extends GatewayRefusal {
   constructor(public status: number, message: string) { super(message); }
 }
 

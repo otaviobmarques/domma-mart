@@ -215,15 +215,33 @@ export class AdminController {
   }
 }
 
-/** Caixa de saída de desenvolvimento: ver links mágicos/códigos sem e-mail real. */
+/**
+ * Caixa de saída de desenvolvimento: mensagens que não saíram por falta de provedor (links mágicos, códigos).
+ * Pública só com DEV_TOOLS=1 (desenvolvimento e CI). Em ambientes de teste publicados, só o back-office vê
+ * (GET /v1/admin/outbox). Em produção não existe.
+ */
+async function outboxRows(prisma: PrismaService, to?: string) {
+  const rows = await prisma.notifications.findMany({ where: { status: 'logged', ...(to ? { to_masked: { startsWith: to.slice(0, 1) } } : {}) }, orderBy: { created_at: 'desc' }, take: 50 });
+  return rows.map(r => ({ at: r.created_at, channel: r.channel, to: r.to_masked, template: r.template, subject: r.subject, body: r.body }));
+}
+
 @Controller('v1/dev')
 @Public()
 export class DevController {
   constructor(private prisma: PrismaService) {}
   @Get('outbox')
   async outbox(@Query('to') to?: string) {
+    if (process.env.NODE_ENV === 'production' || process.env.DEV_TOOLS !== '1') throw new AppError('NOT_FOUND');
+    return outboxRows(this.prisma, to);
+  }
+}
+
+@Controller('v1/admin')
+export class AdminOutboxController {
+  constructor(private prisma: PrismaService) {}
+  @Get('outbox') @Admin('audit.view')
+  async outbox(@Query('to') to?: string) {
     if (process.env.NODE_ENV === 'production') throw new AppError('NOT_FOUND');
-    const rows = await this.prisma.notifications.findMany({ where: { status: 'logged', ...(to ? { to_masked: { startsWith: to.slice(0, 1) } } : {}) }, orderBy: { created_at: 'desc' }, take: 50 });
-    return rows.map(r => ({ at: r.created_at, channel: r.channel, to: r.to_masked, template: r.template, subject: r.subject, body: r.body }));
+    return outboxRows(this.prisma, to);
   }
 }
