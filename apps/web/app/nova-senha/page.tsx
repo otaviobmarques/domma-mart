@@ -9,7 +9,7 @@ export default function NovaSenha() {
       <Card>{ok ? <><p className="font-semibold">Senha alterada. Por segurança, encerramos as outras sessões.</p><a href="/entrar" className="mt-3 inline-block font-bold text-action">Entrar</a></> : <>
         <h1 className="text-[22px] font-extrabold">Nova senha</h1>
         <form className="mt-4 space-y-4" onSubmit={async e => { e.preventDefault(); setErr(null); try { await post('/v1/auth/reset', { token: new URLSearchParams(location.search).get('token'), password: p }); setOk(true); } catch (x) { setErr((x as ApiError).title); } }}>
-          <Field label="Nova senha" type="password" autoComplete="new-password" value={p} onChange={e => setP(e.target.value)} hint="Mínimo de 10 caracteres." />
+          <Field label="Nova senha" type="password" autoComplete="new-password" value={p} onChange={e => setP(e.target.value)} hint="Mínimo de 9 caracteres." />
           {err && <Banner tone="bad">{err}</Banner>}
           <Button type="submit" full>Salvar nova senha</Button>
         </form></>}</Card></main>

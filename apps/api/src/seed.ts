@@ -43,6 +43,13 @@ async function workspace(ownerId: string, name: string, doc: string, approved: b
 
 async function main() {
   const admin = await user('admin@dommamart.com', 'Admin Domma', 'super_admin', true);
+  // usuário de login do back-office; senha própria opcional via ADMIN_PASSWORD (mín. 9 caracteres)
+  const adminPw = process.env.ADMIN_PASSWORD;
+  if (adminPw && adminPw.length < 9) throw new Error('ADMIN_PASSWORD precisa de pelo menos 9 caracteres');
+  // só na primeira vez: depois disso, uma troca de senha feita pelo admin não é desfeita pelo seed
+  if (!admin.u.username) {
+    await prisma.users.update({ where: { id: admin.u.id }, data: { username: 'Admin', ...(adminPw ? { password_hash: await argon2.hash(adminPw, { type: argon2.argon2id }) } : {}) } });
+  }
   await workspace(admin.u.id, 'Domma (interno)', '39053344705', false);
 
   const fin = await user('financeiro@dommamart.com', 'Financeiro Domma', 'finance', true);
@@ -79,7 +86,7 @@ async function main() {
   await prisma.affiliations.upsert({ where: { product_id_affiliate_workspace_id: { product_id: product.id, affiliate_workspace_id: affWs.id } }, create: { product_id: product.id, producer_workspace_id: ws.id, affiliate_workspace_id: affWs.id, affiliate_user_id: aff.u.id, code: 'bruno', status: 'active' }, update: {} });
 
   console.log('\n✔ Seed concluído. Senha de todos: ' + PASSWORD);
-  console.log('  admin@dommamart.com  (back-office)' + (admin.secret ? `  TOTP: ${admin.secret}` : ''));
+  console.log('  Admin / admin@dommamart.com (back-office' + (process.env.ADMIN_PASSWORD ? ', senha de ADMIN_PASSWORD)' : ')') + (admin.secret ? `  TOTP: ${admin.secret}` : ''));
   console.log('  financeiro@dommamart.com (financeiro)' + (fin.secret ? `  TOTP: ${fin.secret}` : ''));
   console.log('  produtora@demo.com   (produtora)  ' + (prod.secret ? `  TOTP: ${prod.secret}` : ''));
   console.log('  afiliado@demo.com    (afiliado, link /r/bruno/confeitaria)');

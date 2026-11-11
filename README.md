@@ -23,7 +23,7 @@ npm run build -w apps/web && npm run start -w apps/web   # Web em :3000
 ```
 
 O seed imprime as contas de demonstração (senha `Domma@Mart2026`) e os segredos TOTP para o app autenticador:
-`produtora@demo.com`, `afiliado@demo.com` e `admin@dommamart.com` (back-office, exige 2FA).
+`produtora@demo.com`, `afiliado@demo.com` e o back-office, que entra com o usuário **`Admin`** (ou `admin@dommamart.com`) e exige 2FA. A senha do Admin vem da variável `ADMIN_PASSWORD` na primeira execução do seed.
 
 - Checkout de exemplo: http://localhost:3000/pay/confeitaria (cupom `BEMVINDO`, link de afiliado `/r/bruno/confeitaria`)
 - Caixa de saída de e-mails/WhatsApp em desenvolvimento: http://localhost:3000/dev/caixa-de-saida

@@ -36,7 +36,7 @@ export const ERRORS = {
   IDEMPOTENCY_KEY_REQUIRED: [400, 'Algo deu errado do nosso lado. Tente de novo em instantes.'],
   IDEMPOTENCY_CONFLICT: [409, 'Esta operação já está sendo processada.'],
   EMAIL_TAKEN: [409, 'Já existe uma conta com este e-mail. Tente entrar.'],
-  WEAK_PASSWORD: [422, 'Use uma senha com pelo menos 10 caracteres.'],
+  WEAK_PASSWORD: [422, 'Use uma senha com pelo menos 9 caracteres.'],
   PWNED_PASSWORD: [422, 'Esta senha já apareceu em vazamentos. Escolha outra.'],
   SALES_PAUSED_KYC: [403, 'Confirme sua identidade para continuar vendendo.'],
   DOMAINS_UNAVAILABLE: [503, 'Domínio próprio ainda não está disponível. Fale com o suporte.'],
