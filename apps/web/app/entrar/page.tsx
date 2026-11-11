@@ -25,7 +25,7 @@ export default function Entrar() {
       <Card>
         <h1 className="text-[22px] font-extrabold">Entrar</h1>
         <form onSubmit={submit} className="mt-5 space-y-4" noValidate>
-          <Field label="E-mail" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} />
+          <Field label="E-mail ou usuário" type="text" autoComplete="username" autoCapitalize="none" value={email} onChange={e => setEmail(e.target.value)} />
           <Field label="Senha" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} />
           {err && <Banner tone="bad">{err}</Banner>}
           <Button type="submit" size="lg" full loading={busy}>Entrar</Button>

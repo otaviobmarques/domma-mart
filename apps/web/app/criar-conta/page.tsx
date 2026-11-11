@@ -6,7 +6,7 @@ import { maskPhone } from '@/lib/format';
 import { Button, Field, Card, Banner, Logo } from '@/components/ui';
 
 function strength(p: string) {
-  let s = 0; if (p.length >= 10) s++; if (p.length >= 14) s++; if (/[A-Z]/.test(p) && /[a-z]/.test(p)) s++; if (/\d/.test(p)) s++; if (/[^A-Za-z0-9]/.test(p)) s++;
+  let s = 0; if (p.length >= 9) s++; if (p.length >= 14) s++; if (/[A-Z]/.test(p) && /[a-z]/.test(p)) s++; if (/\d/.test(p)) s++; if (/[^A-Za-z0-9]/.test(p)) s++;
   return Math.min(4, s);
 }
 export default function CriarConta() {
@@ -23,7 +23,7 @@ export default function CriarConta() {
     const ee: Record<string, string> = {};
     if (f.name.trim().split(/\s+/).length < 2) ee.name = 'Digite seu nome completo.';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email)) ee.email = 'Confira seu e-mail.';
-    if (f.password.length < 10) ee.password = 'Use uma senha com pelo menos 10 caracteres.';
+    if (f.password.length < 9) ee.password = 'Use uma senha com pelo menos 9 caracteres.';
     if (!accept) ee.accept = 'Para continuar, aceite os termos.';
     setErrors(ee); if (Object.keys(ee).length) return;
     setBusy(true);
@@ -42,7 +42,7 @@ export default function CriarConta() {
           <Field label="E-mail" type="email" autoComplete="email" value={f.email} onChange={e => setF({ ...f, email: e.target.value })} error={errors.email} />
           <Field label="Celular" type="tel" inputMode="numeric" autoComplete="tel-national" value={f.phone} onChange={e => setF({ ...f, phone: maskPhone(e.target.value) })} error={errors.phone} />
           <div>
-            <Field label="Senha" type="password" autoComplete="new-password" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} error={errors.password} hint="Mínimo de 10 caracteres." />
+            <Field label="Senha" type="password" autoComplete="new-password" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} error={errors.password} hint="Mínimo de 9 caracteres." />
             {f.password && <div className="mt-2 flex gap-1" aria-label={`Força da senha: ${['fraca', 'fraca', 'média', 'boa', 'forte'][s]}`}>{[0, 1, 2, 3].map(i => <span key={i} className={`h-1.5 flex-1 rounded-full ${i < s ? (s >= 3 ? 'bg-ok' : 'bg-warn-line') : 'bg-line'}`} />)}</div>}
           </div>
           <label className="flex items-start gap-3 text-[14px]"><input type="checkbox" className="mt-0.5 h-5 w-5 accent-[#5B3FE6]" checked={accept} onChange={e => setAccept(e.target.checked)} /><span>Li e aceito os <a href="/termos" className="font-semibold text-action underline">Termos de Uso</a>, a <a href="/privacidade" className="font-semibold text-action underline">Política de Privacidade</a> e a <a href="/produtos-proibidos" className="font-semibold text-action underline">Política de Produtos Proibidos</a>.</span></label>

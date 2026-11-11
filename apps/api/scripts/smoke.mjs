@@ -148,5 +148,15 @@ else {
   const aud = (await req('GET', `/v1/admin/audit?target=workspace:${me.workspace.id}`, null, { cookie: 'adm' })).body;
   ok(aud.chain.ok && aud.rows.some(r => r.action === 'ledger_adjustment.approve') && aud.rows.some(r => r.action === 'ledger_adjustment.request'), 'pedido e aprovação na auditoria com cadeia íntegra');
 }
+
+console.log('\n7) Login por usuário e regra de senha');
+const adminPw = process.env.ADMIN_PASSWORD || 'Domma@Mart2026';
+ok((await req('POST', '/v1/auth/login', { email: 'Admin', password: adminPw })).status === 200, 'back-office entra com o usuário "Admin"');
+ok((await req('POST', '/v1/auth/login', { email: 'admin', password: adminPw })).status === 200, 'usuário não diferencia maiúsculas');
+ok((await req('POST', '/v1/auth/login', { email: 'Admin', password: 'senha-errada' })).status === 401, 'senha errada com usuário é recusada');
+const su = (pw) => req('POST', '/v1/auth/signup', { name: 'Teste Senha', email: `senha.${pw.length}.${Date.now()}@example.com`, phone: '(31) 99999-0000', password: pw, accept_terms: true });
+const s8 = await su('Ab#45678');
+ok(s8.status === 422 && s8.body.code === 'WEAK_PASSWORD', 'senha de 8 caracteres é recusada');
+ok((await su('Ab#456789')).status === 201, 'senha de 9 caracteres é aceita');
 console.log(`\n${pass} ok, ${fail} falhas\n`);
 process.exit(fail ? 1 : 0);

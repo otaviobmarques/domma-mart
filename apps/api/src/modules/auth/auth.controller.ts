@@ -18,6 +18,8 @@ import { GATEWAY, GatewayAdapter } from '../gateway/gateway.types';
 import { Inject } from '@nestjs/common';
 
 const SESSION_DAYS = 7; // RN-82
+/** Mínimo de caracteres da senha. Decisão do cliente: 9 (o descritivo, seção 5.1, sugeria 10). */
+export const MIN_PASSWORD = 9;
 const TERMS_VERSION = '2026-11-01';
 
 /** Checagem contra senhas vazadas por k-anonymity (HIBP) — falha aberta se indisponível. */
@@ -57,7 +59,7 @@ export class AuthController {
     await rl.limit(`signup:${hashIp(clientIp(req))}`, 10, 3600);
     const phone = normalizeBRMobile(d.phone);
     if (!phone) throw new AppError('VALIDATION_ERROR', { fields: { phone: 'Confira o número com DDD.' } });
-    if (d.password.length < 10) throw new AppError('WEAK_PASSWORD', { fields: { password: 'Use uma senha com pelo menos 10 caracteres.' } });
+    if (d.password.length < MIN_PASSWORD) throw new AppError('WEAK_PASSWORD', { fields: { password: `Use uma senha com pelo menos ${MIN_PASSWORD} caracteres.` } });
     if (await isPwned(d.password)) throw new AppError('PWNED_PASSWORD', { fields: { password: 'Esta senha já apareceu em vazamentos. Escolha outra.' } });
     const email = d.email.trim().toLowerCase();
     if (await this.prisma.users.findUnique({ where: { email } })) throw new AppError('EMAIL_TAKEN', { fields: { email: 'Já existe uma conta com este e-mail. Tente entrar.' } });
@@ -104,9 +106,11 @@ export class AuthController {
   @Post('login') @Public() @HttpCode(200)
   async login(@Body() b: any, @Req() req: R, @Res({ passthrough: true }) res: Response) {
     const d = parse(z.object({ email: z.string().max(200), password: z.string().max(200) }), b);
+    const login = d.email.trim();
     const ipHash = hashIp(clientIp(req));
     await rl.limit(`login:ip:${ipHash}`, 30, 900);
-    const u = await this.prisma.users.findUnique({ where: { email: d.email.trim().toLowerCase() } });
+    // aceita e-mail ou nome de usuário (ex.: "Admin" no back-office); citext ignora maiúsculas
+    const u = login.includes('@') ? await this.prisma.users.findUnique({ where: { email: login.toLowerCase() } }) : await this.prisma.users.findUnique({ where: { username: login } });
     // bloqueio progressivo (11.2)
     if (u?.locked_until && u.locked_until > new Date()) throw new AppError('RATE_LIMITED');
     const ok = u?.password_hash ? await argon2.verify(u.password_hash, d.password) : (await argon2.hash('dummy-timing'), false);
@@ -184,7 +188,7 @@ export class AuthController {
     const d = parse(z.object({ token: z.string().max(100), password: z.string().max(200) }), b);
     const row = await this.prisma.email_tokens.findUnique({ where: { token_hash: sha256(d.token) } });
     if (!row || row.purpose !== 'reset_password' || row.used_at || row.expires_at < new Date()) throw new AppError('AUTH_LINK_EXPIRED');
-    if (d.password.length < 10) throw new AppError('WEAK_PASSWORD');
+    if (d.password.length < MIN_PASSWORD) throw new AppError('WEAK_PASSWORD');
     if (await isPwned(d.password)) throw new AppError('PWNED_PASSWORD');
     const hash = await argon2.hash(d.password, { type: argon2.argon2id });
     await this.prisma.$transaction([

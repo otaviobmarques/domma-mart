@@ -29,6 +29,7 @@ enum PlatformRole {
 model users {
   id                String       @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
   email             String       @unique @db.Citext
+  username          String?      @unique @db.Citext
   name              String
   phone_enc         Bytes?
   password_hash     String?
