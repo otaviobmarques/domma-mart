@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { DiscoveryModule } from '@nestjs/core';
 import { PrismaService } from './infra/prisma.service';
 import { AuditService } from './infra/audit.service';
 import { StorageService } from './infra/storage.service';
@@ -37,7 +38,7 @@ function gatewayFactory() {
 }
 
 @Module({
-  imports: [EventEmitterModule.forRoot()],
+  imports: [EventEmitterModule.forRoot(), DiscoveryModule],
   controllers: [
     HealthController, CheckoutController, WebhooksController, SandboxController, AuthController, CustomerController, OptOutController,
     ProductsController, MembersController, FilesController, DashboardController, KycController, AffiliatesController, SettingsController,
