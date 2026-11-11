@@ -3,6 +3,7 @@ import { use, useEffect, useMemo, useRef, useState } from 'react';
 import { get, post, api, ApiError, uuid } from '@/lib/api';
 import { brl, maskDoc, maskPhone, digits, isValidCPF, isValidCNPJ, emailSuggestion } from '@/lib/format';
 import { tokenizeCard, brandOf } from '@/lib/tokenizer';
+import { deviceId } from '@/lib/device';
 import { run3DS, needs3DS, type BillingAddress } from '@/lib/threeds';
 import { loadPixels, track } from '@/lib/pixels';
 import { Button, Field, Skeleton, Banner, Initials, cx, Logo } from '@/components/ui';
@@ -179,6 +180,8 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
         three_ds,
         method, installments: method === 'card' ? installments : 1, card_token, bump_offer_ids: bumps,
         coupon_code: coupon?.code, tracking, affiliate_code: qs.get('ref') ?? undefined,
+        device_fingerprint: await deviceId().catch(() => undefined),
+        card_bin: method === 'card' && !ocReady ? digits(card.number).slice(0, 6) : undefined,
       }, { idem: idemRef.current });
       location.href = r.next.url;
     } catch (err) {

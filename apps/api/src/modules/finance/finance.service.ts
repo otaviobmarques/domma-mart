@@ -23,7 +23,7 @@ export class FinanceService {
 
   async balance(workspaceId: string) {
     const ws = await this.prisma.workspaces.findUniqueOrThrow({ where: { id: workspaceId } });
-    return { ...(await this.ledger.balance(workspaceId)), daily_limit_cents: ws.daily_withdraw_limit };
+    return { ...(await this.ledger.balance(workspaceId)), daily_limit_cents: ws.daily_withdraw_limit, payouts_paused: !!ws.payouts_paused_at };
   }
 
   /** Valida o código 2FA com bloqueio após 5 erros por 30 min (tela 19.9). */
@@ -152,6 +152,7 @@ export class FinanceService {
     if (prior) return { withdrawal_id: prior.id, status: prior.status };
     const ws = await this.prisma.workspaces.findUniqueOrThrow({ where: { id: workspaceId } });
     if (ws.blocked_at) throw new AppError('ACCOUNT_BLOCKED');
+    if (ws.payouts_paused_at) throw new AppError('PAYOUTS_PAUSED');
     if (ws.kyc_status !== 'approved') throw new AppError('KYC_REQUIRED');
     await this.checkOtp(userId, otp);
     if (amount < MIN_WITHDRAW) throw new AppError('WITHDRAWAL_MIN');

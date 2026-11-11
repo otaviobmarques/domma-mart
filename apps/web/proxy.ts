@@ -17,7 +17,7 @@ function isMainHost(host: string) {
 
 const API_PREFIXES = ['/v1/', '/r/', '/webhooks/'];
 /** Cabeçalhos que só o site pode definir: o que vier do visitante é descartado. */
-const EDGE_HEADERS = ['x-domma-edge', 'x-domma-client-ip', 'x-dm-host'];
+const EDGE_HEADERS = ['x-domma-edge', 'x-domma-client-ip', 'x-domma-client-country', 'x-dm-host'];
 
 /** Carimbo para a API (ver apps/api/src/http/edge.ts): chave secreta + IP real do visitante, visto pela Vercel. */
 function edgeHeaders(req: NextRequest, host?: string) {
@@ -27,6 +27,9 @@ function edgeHeaders(req: NextRequest, host?: string) {
   // na Vercel, x-real-ip e x-forwarded-for são definidos por ela (o valor enviado pelo visitante é sobrescrito)
   const ip = req.headers.get('x-real-ip') || (req.headers.get('x-forwarded-for') || '').split(',')[0].trim();
   if (ip) h.set('x-domma-client-ip', ip);
+  // país do IP (a Vercel define; usado pelo antifraude)
+  const country = req.headers.get('x-vercel-ip-country');
+  if (country && /^[A-Z]{2}$/.test(country)) h.set('x-domma-client-country', country);
   if (host) h.set('x-dm-host', host);
   return h;
 }

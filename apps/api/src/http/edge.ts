@@ -40,3 +40,10 @@ export function trustedHostHeader(req: Request): string | undefined {
   const h = (req.headers['x-dm-host'] as string) || '';
   return h.split(',')[0].trim().toLowerCase() || undefined;
 }
+
+/** País do IP (ISO, 2 letras), só quando veio do site. Sem EDGE_SECRET (dev/CI), aceita o cabeçalho para testes. */
+export function trustedClientCountry(req: Request): string | undefined {
+  if (edgeEnforced() && !(req as any).edgeVerified) return undefined;
+  const c = String(req.headers['x-domma-client-country'] || '').trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(c) ? c : undefined;
+}

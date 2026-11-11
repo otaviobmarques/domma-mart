@@ -5,7 +5,7 @@ import { CheckoutService } from './checkout.service';
 import { FunnelService } from './funnel.service';
 import { PrismaService } from '../../infra/prisma.service';
 import { Public, Req as R, clientIp } from '../../http/context';
-import { trustedHostHeader } from '../../http/edge';
+import { trustedHostHeader, trustedClientCountry } from '../../http/edge';
 import { AppError } from '../../common/errors';
 import { verifyToken, randomToken, sha256, blindIndex } from '../../common/crypto';
 import { parse, z } from '../../http/zod';
@@ -38,6 +38,7 @@ const OrderSchema = z.object({
   tracking: z.record(z.string(), z.string()).optional(),
   affiliate_code: z.string().max(60).optional(),
   device_fingerprint: z.string().max(100).optional(),
+  card_bin: z.string().regex(/^\d{6,8}$/).optional(),
 });
 
 /** Domínio próprio do produtor em uso (o proxy do site repassa em x-dm-host). */
@@ -104,7 +105,7 @@ export class CheckoutController {
     if (!idem || idem.length < 16 || idem.length > 100) throw new AppError('IDEMPOTENCY_KEY_REQUIRED');
     if (!(await verifyTurnstile(captcha, clientIp(req)))) throw new AppError('RATE_LIMITED');
     const body = parse(OrderSchema, b);
-    const r = await this.svc.createOrder(offerId, body, { ip: clientIp(req), ua: String(req.headers['user-agent'] || ''), idempotencyKey: `co:${idem}`, affiliateCookie: req.cookies?.[`dm_aff_${offerId}`] || req.cookies?.dm_aff, host: requestHost(req) });
+    const r = await this.svc.createOrder(offerId, body, { ip: clientIp(req), ua: String(req.headers['user-agent'] || ''), idempotencyKey: `co:${idem}`, affiliateCookie: req.cookies?.[`dm_aff_${offerId}`] || req.cookies?.dm_aff, host: requestHost(req), country: trustedClientCountry(req as any) });
     return toJSON(r);
   }
 

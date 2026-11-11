@@ -36,7 +36,9 @@ export class AdminController {
     const adjustments = await this.prisma.ledger_adjustments.count({ where: { status: 'pending' } });
     const failedHooks = await this.prisma.webhook_events_in.count({ where: { processed_at: null, created_at: { lt: new Date(Date.now() - 5 * 60_000) } } });
     const privacy = await this.prisma.privacy_requests.count({ where: { status: 'pending' } });
-    return toJSON({ pending: { kyc, moderation, disputes, failed_webhooks: failedHooks, adjustments, privacy }, accounts, platform_revenue_cents: rev.s, gmv_30d_cents: gmv.s, orders_30d: gmv.n });
+    const fraud = await this.prisma.risk_assessments.count({ where: { review_status: 'open' } });
+    const alerts = await this.prisma.risk_alerts.count({ where: { acknowledged_at: null } });
+    return toJSON({ pending: { kyc, moderation, disputes, failed_webhooks: failedHooks, adjustments, privacy, fraud_reviews: fraud, risk_alerts: alerts }, accounts, platform_revenue_cents: rev.s, gmv_30d_cents: gmv.s, orders_30d: gmv.n });
   }
 
   // ───── Fila de KYC (19.11) ─────
@@ -107,7 +109,7 @@ export class AdminController {
     const users = q ? await this.prisma.users.findMany({ where: { OR: [{ email: { contains: q.toLowerCase() } }, { name: { contains: q, mode: 'insensitive' } }] }, take: 50 }) : [];
     const ws = await this.prisma.workspaces.findMany({ where: q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { owner_id: { in: users.map(u => u.id) } }] } : {}, orderBy: { created_at: 'desc' }, take: 100 });
     const owners = await this.prisma.users.findMany({ where: { id: { in: ws.map(w => w.owner_id) } } });
-    return toJSON(ws.map(w => ({ id: w.id, name: w.name, owner_email: maskEmail(owners.find(u => u.id === w.owner_id)?.email ?? 'x@x'), kyc_status: w.kyc_status, blocked: !!w.blocked_at, blocked_reason: w.blocked_reason, custom_fee_bps: w.custom_fee_bps, daily_withdraw_limit: w.daily_withdraw_limit, created_at: w.created_at })));
+    return toJSON(ws.map(w => ({ id: w.id, name: w.name, owner_email: maskEmail(owners.find(u => u.id === w.owner_id)?.email ?? 'x@x'), kyc_status: w.kyc_status, blocked: !!w.blocked_at, blocked_reason: w.blocked_reason, custom_fee_bps: w.custom_fee_bps, daily_withdraw_limit: w.daily_withdraw_limit, reserve_pct: w.reserve_pct, reserve_days: w.reserve_days, payouts_paused: !!w.payouts_paused_at, payouts_paused_reason: w.payouts_paused_reason, created_at: w.created_at })));
   }
 
   @Post('accounts/:id/block') @Admin('risk.manage') @HttpCode(200)
@@ -121,11 +123,11 @@ export class AdminController {
 
   @Patch('accounts/:id/limits') @Admin('fees.manage')
   async limits(@Ctx() c: ProducerCtx, @Param('id') id: string, @Body() b: any) {
-    const d = parse(z.object({ custom_fee_bps: z.number().int().min(0).max(2000).nullable().optional(), daily_withdraw_limit: z.number().int().min(1000).optional(), reserve_pct: z.number().int().min(0).max(50).optional(), reason: Reason }), b);
+    const d = parse(z.object({ custom_fee_bps: z.number().int().min(0).max(2000).nullable().optional(), daily_withdraw_limit: z.number().int().min(1000).optional(), reserve_pct: z.number().int().min(0).max(50).optional(), reserve_days: z.number().int().min(1).max(180).optional(), reason: Reason }), b);
     const ws = await this.prisma.workspaces.findUniqueOrThrow({ where: { id } });
     const { reason, ...data } = d;
     const upd = await this.prisma.workspaces.update({ where: { id }, data: { ...data, daily_withdraw_limit: data.daily_withdraw_limit != null ? BigInt(data.daily_withdraw_limit) : undefined } });
-    await this.audit.log({ actorId: c.userId, action: 'account.limits', target: `workspace:${id}`, before: { fee: ws.custom_fee_bps, limit: ws.daily_withdraw_limit, reserve: ws.reserve_pct }, after: { fee: upd.custom_fee_bps, limit: upd.daily_withdraw_limit, reserve: upd.reserve_pct }, reason });
+    await this.audit.log({ actorId: c.userId, action: 'account.limits', target: `workspace:${id}`, before: { fee: ws.custom_fee_bps, limit: ws.daily_withdraw_limit, reserve: ws.reserve_pct, reserve_days: ws.reserve_days }, after: { fee: upd.custom_fee_bps, limit: upd.daily_withdraw_limit, reserve: upd.reserve_pct, reserve_days: upd.reserve_days }, reason });
     return { ok: true };
   }
 
@@ -172,29 +174,6 @@ export class AdminController {
   async refund(@Ctx() c: ProducerCtx, @Param('id') id: string, @Body() b: any) {
     const { reason } = parse(z.object({ reason: Reason }), b);
     return toJSON(await this.orders.refund(id, 'platform', { actorId: c.userId, reason }));
-  }
-
-  // ───── Risco (RN-55) ─────
-  @Get('risk') @Admin('risk.manage')
-  async risk() {
-    const rows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
-      SELECT o.workspace_id, w.name, COUNT(*) FILTER (WHERE o.paid_at IS NOT NULL)::int paid,
-        COUNT(*) FILTER (WHERE o.status IN ('chargeback','chargeback_lost','chargeback_won'))::int cb,
-        COUNT(*) FILTER (WHERE o.status='refunded')::int refunds
-      FROM orders o JOIN workspaces w ON w.id=o.workspace_id WHERE o.created_at > now() - interval '30 days' GROUP BY 1,2`);
-    return rows.map(r => {
-      const rate = r.paid ? (r.cb / r.paid) * 100 : 0;
-      return { ...r, chargeback_pct: Math.round(rate * 100) / 100, refund_pct: r.paid ? Math.round((r.refunds / r.paid) * 10000) / 100 : 0, level: rate >= 2 ? 'bloqueio cautelar' : rate >= 1.5 ? 'revisão' : rate >= 1 ? 'alerta' : 'ok' };
-    }).sort((a, b) => b.chargeback_pct - a.chargeback_pct);
-  }
-
-  @Post('blocklist') @Admin('risk.manage')
-  async addBlock(@Ctx() c: ProducerCtx, @Body() b: any) {
-    const d = parse(z.object({ kind: z.enum(['cpf', 'email', 'email_domain', 'ip']), value: z.string().min(3).max(200), reason: Reason, days: z.number().int().min(1).max(3650).optional() }), b);
-    const value = d.kind === 'cpf' ? d.value.replace(/\D/g, '') : d.kind === 'ip' ? `ip:${d.value}` : d.value.toLowerCase();
-    await this.prisma.blocklist.upsert({ where: { kind_value_hash: { kind: d.kind, value_hash: blindIndex(value) } }, create: { kind: d.kind, value_hash: blindIndex(value), reason: d.reason, created_by: c.userId, expires_at: d.days ? new Date(Date.now() + d.days * 86400000) : null }, update: { reason: d.reason } });
-    await this.audit.log({ actorId: c.userId, action: 'blocklist.add', target: `blocklist:${d.kind}`, reason: d.reason });
-    return { ok: true };
   }
 
   // ───── Auditoria e conciliação ─────

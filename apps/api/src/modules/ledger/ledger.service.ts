@@ -88,6 +88,47 @@ export class LedgerService {
     return credits;
   }
 
+  /**
+   * Antifraude: segura em "Em análise" os créditos de produtor, afiliado e sócios de um pedido em revisão.
+   * Idempotente (só segura o que ainda não está seguro). Cada parcela volta depois na mesma data de liberação.
+   */
+  async holdOrder(tx: Tx, orderId: string, code: string) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'hold:' + orderId}))`;
+    const already = await tx.ledger_entries.count({ where: { reference_type: 'risk_hold', reference_id: orderId } });
+    if (already) return false;
+    const credits = await tx.ledger_entries.findMany({ where: { reference_type: 'order', reference_id: orderId, owner_type: 'workspace', bucket: 'balance', credit_cents: { gt: 0 } } });
+    const entries: Entry[] = [];
+    for (const c of credits) {
+      entries.push({ owner_type: 'workspace', owner_id: c.owner_id, bucket: 'balance', debit: c.credit_cents, available_at: c.available_at, description: `Em análise de segurança — ${code}` });
+      entries.push({ owner_type: 'workspace', owner_id: c.owner_id, bucket: 'blocked', credit: c.credit_cents, available_at: c.available_at, description: `Em análise de segurança — ${code}` });
+    }
+    if (!entries.length) return false;
+    await this.post(tx, { type: 'risk_hold', id: orderId }, entries);
+    return true;
+  }
+
+  /** Devolve ao saldo o que holdOrder segurou (aprovação da análise, ou antes de um reembolso/contestação). */
+  async releaseOrderHold(tx: Tx, orderId: string, code: string, description = `Análise de segurança concluída — ${code}`) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'hold:' + orderId}))`;
+    const rows = await tx.ledger_entries.findMany({ where: { reference_type: 'risk_hold', reference_id: orderId, bucket: 'blocked' } });
+    // agrupa por beneficiário + data: o que ainda está seguro (crédito − débito)
+    const net = new Map<string, { owner_id: string | null; at: Date; amount: bigint }>();
+    for (const r of rows) {
+      const k = `${r.owner_id}|${r.available_at.toISOString()}`;
+      const cur = net.get(k) ?? { owner_id: r.owner_id, at: r.available_at, amount: 0n };
+      cur.amount += r.credit_cents - r.debit_cents;
+      net.set(k, cur);
+    }
+    const entries: Entry[] = [];
+    for (const v of net.values()) {
+      if (v.amount <= 0n) continue;
+      entries.push({ owner_type: 'workspace', owner_id: v.owner_id, bucket: 'blocked', debit: v.amount, available_at: v.at, description });
+      entries.push({ owner_type: 'workspace', owner_id: v.owner_id, bucket: 'balance', credit: v.amount, available_at: v.at, description });
+    }
+    if (entries.length) await this.post(tx, { type: 'risk_hold', id: orderId }, entries);
+    return entries.length > 0;
+  }
+
   async movements(workspaceId: string, opts: { from?: Date; to?: Date; cursor?: string; limit?: number }) {
     return this.prisma.ledger_entries.findMany({
       where: { owner_type: 'workspace', owner_id: workspaceId, created_at: { gte: opts.from, lte: opts.to }, ...(opts.cursor ? { id: { lt: opts.cursor } } : {}) },

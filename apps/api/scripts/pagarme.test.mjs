@@ -39,8 +39,11 @@ await new Promise(r => fake.listen(4230, '127.0.0.1', r));
 
 // ───── Cliente da API ─────
 const jar = {};
+// como um comprador de verdade: IP próprio desta execução e aparelho por comprador (o antifraude conta tentativas por IP, CPF e aparelho)
+const RUN_IP = `198.51.100.${1 + Math.floor(Math.random() * 250)}`;
 async function req(method, path, body, who, headers = {}) {
-  const h = { 'content-type': 'application/json', 'x-requested-with': 'domma', ...headers };
+  const h = { 'content-type': 'application/json', 'x-requested-with': 'domma', 'x-forwarded-for': RUN_IP, ...headers };
+  if (body && body.method === 'card' && !body.device_fingerprint) body = { ...body, device_fingerprint: `pgm${Buffer.from(body.customer?.email ?? 'oc').toString('hex').slice(0, 40)}` };
   if (who && jar[who]) h.cookie = jar[who];
   const r = await fetch(API + path, { method, headers: h, body: body ? JSON.stringify(body) : undefined });
   const sc = r.headers.getSetCookie?.() ?? [];
@@ -56,7 +59,8 @@ function totp(secret) {
   return String((((hm[o] & 127) << 24) | (hm[o + 1] << 16) | (hm[o + 2] << 8) | hm[o + 3]) % 1e6).padStart(6, '0');
 }
 const IMG = 'data:image/jpeg;base64,' + Buffer.from('foto').toString('base64');
-const buyer = (n) => ({ name: 'Maria Souza', email: `maria.pgm.${n}.${Date.now()}@example.com`, phone: '(31) 99999-0000', document: '529.982.247-25' });
+const cpf = () => { const d = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)); for (const n of [9, 10]) { const s = d.reduce((a, x, i) => a + x * (n + 1 - i), 0); d.push((s * 10) % 11 % 10); } return d.join(''); };
+const buyer = (n) => ({ name: 'Maria Souza', email: `maria.pgm.${n}.${Date.now()}@example.com`, phone: '(31) 99999-0000', document: cpf() });
 
 console.log('\n1) Nova produtora: sem recebedor não vende');
 const email = `nova.${Date.now()}@example.com`;

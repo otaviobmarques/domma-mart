@@ -6,6 +6,8 @@ import { LedgerService, Entry } from '../ledger/ledger.service';
 import { GATEWAY, GatewayAdapter } from '../gateway/gateway.types';
 import { canTransition, OrderStatus, POST_PAID } from '../../domain/order-state';
 import { releaseSchedule, applyBps, Method } from '../../domain/money';
+import { applyReserve, reserveFor } from '../../domain/risk';
+import { RiskService } from '../risk/risk.service';
 import { AppError } from '../../common/errors';
 import { AuditService } from '../../infra/audit.service';
 
@@ -27,6 +29,7 @@ export class OrdersService {
     private events: EventEmitter2,
     private audit: AuditService,
     @Inject(GATEWAY) private gateway: GatewayAdapter,
+    private risk: RiskService,
   ) {}
 
   /**
@@ -83,6 +86,7 @@ export class OrdersService {
       // Ledger: entrada no gateway (débito) e créditos congelados na venda (RN-06), com prazos (RN-35)
       const entries: Entry[] = [{ owner_type: 'gateway', owner_id: null, bucket: 'clearing', debit: order.total_cents, description: `Venda ${order.code}` }];
       const product = await tx.products.findUniqueOrThrow({ where: { id: order.items.find(i => i.kind === 'main')!.product_id } });
+      const riskCfg = await this.risk.config();
       for (const s of order.splits) {
         if (s.amount_cents === 0n) continue;
         if (s.beneficiary_type === 'platform') {
@@ -90,11 +94,19 @@ export class OrdersService {
           continue;
         }
         const label = s.beneficiary_type === 'producer' ? `Venda de ${product.name}` : s.beneficiary_type === 'affiliate' ? `Comissão de afiliado — ${product.name}` : `Sociedade em ${product.name}`;
-        for (const part of releaseSchedule(s.amount_cents, order.method as Method, paidAt, guaranteeEnds)) {
+        // reserva de segurança (conta nova ou definida no back-office): parte do valor fica "Chegando" por mais tempo
+        const bws = await tx.workspaces.findUnique({ where: { id: s.beneficiary_id! }, select: { reserve_pct: true, reserve_days: true, created_at: true } });
+        const res = bws ? reserveFor(bws, await tx.orders.count({ where: { workspace_id: s.beneficiary_id!, paid_at: { not: null } } }), riskCfg, paidAt) : null;
+        let parts = releaseSchedule(s.amount_cents, order.method as Method, paidAt, guaranteeEnds);
+        if (res) parts = applyReserve(parts, res.pct, res.days, paidAt);
+        for (const part of parts) {
           entries.push({ owner_type: 'workspace', owner_id: s.beneficiary_id, bucket: 'balance', credit: part.amount, available_at: part.availableAt, description: `${label} (${order.code})` });
         }
       }
       await this.ledger.post(tx, { type: 'order', id: orderId }, entries);
+      // antifraude: compra em revisão → dinheiro do produtor, afiliado e sócios fica "Em análise"
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'hold:' + orderId}))`;
+      if (await tx.risk_assessments.count({ where: { order_id: orderId, review_status: 'open' } })) await this.ledger.holdOrder(tx, orderId, order.code);
 
       // Matrícula para cada item (RN-24, RN-32)
       for (const it of order.items) {
@@ -174,6 +186,9 @@ export class OrdersService {
       const ok = await this.transition(tx, orderId, 'refunded', 'refund.done', {}, pending);
       if (!ok) return;
       const ref = { type: 'refund', id: refundId ?? orderId };
+      // valor em análise de segurança volta ao saldo antes de ser revertido; a revisão se encerra
+      await this.ledger.releaseOrderHold(tx, orderId, order.code, `Fim da análise (reembolso) — ${order.code}`);
+      await tx.risk_assessments.updateMany({ where: { order_id: orderId, review_status: 'open' }, data: { review_status: 'closed', reviewed_at: new Date(), review_reason: 'Pedido reembolsado' } });
       // divisão revertida na mesma proporção (RN-53), incluindo a taxa Domma (RN-52)
       await this.ledger.reverseOrderCredits(tx, orderId, { ref, owners: ['workspace', 'platform'], description: (e) => e.owner_type === 'platform' ? `Estorno de taxa — ${order.code}` : `Reembolso — ${order.code}` });
       // custo do gateway não é devolvido ao produtor (RN-52)
@@ -199,6 +214,8 @@ export class OrdersService {
       const order = await tx.orders.findUniqueOrThrow({ where: { id: orderId } });
       if (stage === 'opened') {
         if (!(await this.transition(tx, orderId, 'chargeback', 'chargeback.opened', {}, pending))) return;
+        await this.ledger.releaseOrderHold(tx, orderId, order.code, `Fim da análise (contestação) — ${order.code}`);
+        await tx.risk_assessments.updateMany({ where: { order_id: orderId, review_status: 'open' }, data: { review_status: 'closed', reviewed_at: new Date(), review_reason: 'Cliente contestou a compra' } });
         await this.ledger.reverseOrderCredits(tx, orderId, { ref: { type: 'chargeback', id: orderId }, owners: ['workspace'], toBlocked: true, description: () => `Cliente contestou a compra ${order.code}` });
         const items = await tx.order_items.findMany({ where: { order_id: orderId } });
         await tx.enrollments.updateMany({ where: { order_item_id: { in: items.map(i => i.id) } }, data: { status: 'suspended' } });
