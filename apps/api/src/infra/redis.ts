@@ -1,9 +1,9 @@
 import IORedis from 'ioredis';
 let client: IORedis | null = null;
 export function redis(): IORedis {
-  if (!client) client = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', { maxRetriesPerRequest: null });
+  if (!client) client = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', { maxRetriesPerRequest: null, family: 0 });
   return client;
 }
 export function newRedis(): IORedis {
-  return new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', { maxRetriesPerRequest: null });
+  return new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', { maxRetriesPerRequest: null, family: 0 });
 }
