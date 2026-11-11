@@ -13,6 +13,7 @@ import cookieParser from 'cookie-parser';
 import express from 'express';
 import { AppModule } from './app.module';
 import { buildOpenApi } from './openapi';
+import { edgeGuard } from './http/edge';
 
 (BigInt.prototype as any).toJSON = function () { return Number(this); };
 
@@ -20,6 +21,8 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true, bodyParser: false, logger: ['log', 'warn', 'error'] });
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
+  app.use(edgeGuard); // só o site (Vercel) acessa a API — ver http/edge.ts
+  if (process.env.NODE_ENV === 'production' && !process.env.EDGE_SECRET) console.warn('[segurança] EDGE_SECRET não definido: a API confia em X-Forwarded-For e aceita acesso direto');
   app.use(cookieParser());
   // partes de upload chegam como binário
   app.use(/^\/v1\/uploads\/[^/]+\/parts\/\d+$/, express.raw({ type: '*/*', limit: '9mb' }));

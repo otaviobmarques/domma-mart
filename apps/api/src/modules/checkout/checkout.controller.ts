@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CheckoutService } from './checkout.service';
 import { PrismaService } from '../../infra/prisma.service';
 import { Public, Req as R, clientIp } from '../../http/context';
+import { trustedHostHeader } from '../../http/edge';
 import { AppError } from '../../common/errors';
 import { verifyToken, randomToken, sha256, blindIndex } from '../../common/crypto';
 import { parse, z } from '../../http/zod';
@@ -38,10 +39,9 @@ const OrderSchema = z.object({
   device_fingerprint: z.string().max(100).optional(),
 });
 
-/** Domínio que o comprador está usando (o site repassa em x-dm-host; o Vercel em x-forwarded-host). */
+/** Domínio próprio do produtor em uso (o proxy do site repassa em x-dm-host). */
 function requestHost(req: R): string | undefined {
-  const h = (req.headers['x-dm-host'] as string) || (req.headers['x-forwarded-host'] as string) || '';
-  return h.split(',')[0].trim().toLowerCase() || undefined;
+  return trustedHostHeader(req as any);
 }
 
 function orderFromToken(id: string, t: string | undefined) {
