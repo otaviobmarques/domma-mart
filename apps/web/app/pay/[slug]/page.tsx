@@ -11,7 +11,7 @@ type Offer = {
   installment_interest: 'buyer' | 'producer'; max_installments: number; installment_options: { n: number; installment_cents: number; total_cents: number; interest_free: boolean }[];
   product: { name: string; type: string; cover_url: string | null; description: string | null }; seller: { name: string; whatsapp: string | null };
   theme: { color?: string; logo_url?: string; banner_url?: string; testimonials?: { name: string; text: string }[]; countdown_minutes?: number; pixels?: any };
-  bumps: { offer_id: string; name: string; headline: string | null; price_cents: number; cover_url: string | null }[]; gateway: string;
+  bumps: { offer_id: string; name: string; headline: string | null; price_cents: number; cover_url: string | null }[]; gateway: string; gateway_public_key?: string | null;
 };
 
 const ORDER = ['pix', 'card', 'boleto'] as const;
@@ -118,7 +118,7 @@ export default function Checkout({ params }: { params: Promise<{ slug: string }>
     try {
       let card_token: string | undefined;
       if (method === 'card') {
-        try { card_token = (await tokenizeCard({ ...card, name })).token; }
+        try { card_token = (await tokenizeCard({ ...card, name }, { provider: offer.gateway, publicKey: offer.gateway_public_key })).token; }
         catch (err) { setErrors({ card_number: (err as Error).message }); focusFirst({ card_number: 'x' }); setBusy(false); return; }
         track('AddPaymentInfo', { value: p.total / 100 });
       }

@@ -242,7 +242,15 @@ export class DashboardController {
 
   @Put('finance/payout-account') @Producer('finance.withdraw')
   async payout(@Ctx() c: ProducerCtx, @Body() b: any, @Req() req: R, @Headers('x-otp') otp?: string) {
-    const { pix_key } = parse(z.object({ pix_key: z.string().min(5).max(120) }), b);
-    return toJSON(await this.finance.setPayoutAccount(c.workspaceId, c.userId, pix_key, otp, hashIp(clientIp(req))));
+    const d = parse(z.object({
+      pix_key: z.string().min(5).max(120).optional(),
+      bank: z.object({
+        bank: z.string().regex(/^\d{3}$/, 'Código do banco com 3 números.'), branch: z.string().regex(/^\d{1,4}$/, 'Agência sem o dígito, até 4 números.'), branch_digit: z.string().regex(/^[0-9Xx]$/).optional(),
+        account: z.string().regex(/^\d{1,13}$/, 'Número da conta, até 13 números.'), account_digit: z.string().regex(/^[0-9Xx]{1,2}$/, 'Dígito da conta.'), type: z.enum(['checking', 'savings']),
+      }).optional(),
+    }), b);
+    if (d.bank) return toJSON(await this.finance.setBankAccount(c.workspaceId, c.userId, { bank: d.bank.bank, branch: d.bank.branch, branchDigit: d.bank.branch_digit, account: d.bank.account, accountDigit: d.bank.account_digit.toUpperCase(), type: d.bank.type }, otp, hashIp(clientIp(req))));
+    if (!d.pix_key) throw new AppError('VALIDATION_ERROR', { fields: { pix_key: 'Informe a chave Pix.' } });
+    return toJSON(await this.finance.setPayoutAccount(c.workspaceId, c.userId, d.pix_key, otp, hashIp(clientIp(req))));
   }
 }

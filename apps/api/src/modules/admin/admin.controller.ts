@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Logger, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infra/prisma.service';
 import { StorageService } from '../../infra/storage.service';
@@ -6,6 +6,7 @@ import { AuditService } from '../../infra/audit.service';
 import { NotifyService } from '../../infra/notify.service';
 import { OrdersService } from '../orders/orders.service';
 import { GATEWAY, GatewayAdapter } from '../gateway/gateway.types';
+import { FinanceService } from '../finance/finance.service';
 import { Admin, Ctx, ProducerCtx, Public, Req as R, clientIp } from '../../http/context';
 import { parse, z } from '../../http/zod';
 import { AppError } from '../../common/errors';
@@ -19,7 +20,8 @@ const Reason = z.string().min(10, 'Explique o motivo (mín. 10 caracteres).').ma
 
 @Controller('v1/admin')
 export class AdminController {
-  constructor(private prisma: PrismaService, private storage: StorageService, private audit: AuditService, private notify: NotifyService, private orders: OrdersService, @Inject(GATEWAY) private gateway: GatewayAdapter) {}
+  private log = new Logger('Admin');
+  constructor(private prisma: PrismaService, private storage: StorageService, private audit: AuditService, private notify: NotifyService, private orders: OrdersService, private finance: FinanceService, @Inject(GATEWAY) private gateway: GatewayAdapter) {}
 
   @Get('overview') @Admin('admin.view')
   async overview() {
@@ -67,14 +69,14 @@ export class AdminController {
     if (!r || r.status !== 'in_review') throw new AppError('NOT_FOUND');
     const ws = await this.prisma.workspaces.findUniqueOrThrow({ where: { id: r.workspace_id } });
     const owner = await this.prisma.users.findUniqueOrThrow({ where: { id: ws.owner_id } });
-    let subaccount = ws.gateway_subaccount_id;
-    if (d.decision === 'approve' && !subaccount) subaccount = (await this.gateway.createSubaccount({ workspaceId: ws.id, name: r.name, document: decrypt(r.document_enc) })).id;
     const newStatus = d.decision === 'approve' ? 'approved' : d.decision === 'reject' ? 'rejected' : 'pending';
     await this.prisma.$transaction(async (tx) => {
       await tx.kyc_submissions.update({ where: { id }, data: { status: d.decision === 'request_docs' ? 'rejected' : (newStatus as any), decided_by: c.userId, decision_reason: d.reason, decided_at: new Date() } });
-      await tx.workspaces.update({ where: { id: ws.id }, data: { kyc_status: newStatus as any, gateway_subaccount_id: subaccount } });
+      await tx.workspaces.update({ where: { id: ws.id }, data: { kyc_status: newStatus as any } });
       await this.audit.log({ actorId: c.userId, action: `kyc.${d.decision}`, target: `workspace:${ws.id}`, before: { kyc_status: ws.kyc_status }, after: { kyc_status: newStatus, category: d.category }, reason: d.reason, ipHash: hashIp(clientIp(req)) }, tx);
     });
+    // subconta no gateway (no sandbox nasce aqui; na Pagar.me normalmente já existe desde o cadastro da conta bancária)
+    if (d.decision === 'approve') await this.finance.ensureSubaccount(ws.id).catch(e => this.log.error(`subconta ${ws.id}: ${(e as Error).message}`));
     const link = `${process.env.APP_URL}/identidade`;
     if (d.decision === 'approve') await this.notify.send({ channel: 'email', to: owner.email, template: 'kyc_approved', workspaceId: ws.id, vars: {} });
     else await this.notify.send({ channel: 'email', to: owner.email, template: d.decision === 'reject' ? 'kyc_rejected' : 'kyc_more_docs', workspaceId: ws.id, vars: { motivo: d.reason, link } });

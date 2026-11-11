@@ -71,7 +71,7 @@ export class CheckoutService {
       seller: { name: p.workspace.name || owner?.name, whatsapp: p.workspace.support_whatsapp },
       theme: offer.theme ?? {},
       bumps: offer.bumps.map(b => { const o = bumps.find(x => x.id === b.bump_offer_id); return o && { offer_id: o.id, name: o.product.name, headline: b.headline, price_cents: o.price_cents, cover_url: o.product.cover_url }; }).filter(Boolean),
-      gateway: this.gateway.name,
+      gateway: this.gateway.name, gateway_public_key: this.gateway.publicConfig().publicKey,
       turnstile_site_key: process.env.TURNSTILE_SITE_KEY || null,
     };
   }
@@ -150,6 +150,9 @@ export class CheckoutService {
       const [{ s }] = await this.prisma.$queryRaw<{ s: bigint | null }[]>`SELECT SUM(total_cents)::bigint s FROM orders WHERE workspace_id=${ws.id}::uuid AND status IN ('paid','refund_requested','chargeback')`;
       if ((s ?? 0n) >= 500_000n) throw new AppError('OFFER_UNAVAILABLE', { title: 'Esta oferta está temporariamente indisponível.' });
     }
+
+    // Gateways que não guardam saldo de terceiros na conta da plataforma: o produtor precisa ter recebedor
+    if (this.gateway.requiresSubaccountToSell && !ws.gateway_subaccount_id) throw new AppError('OFFER_UNAVAILABLE', { title: 'Este vendedor ainda está configurando os recebimentos. Tente de novo mais tarde.' });
 
     // Itens: oferta principal + até 3 ofertas especiais do mesmo produtor (RN-23)
     const bumpIds = [...new Set(body.bump_offer_ids ?? [])].filter(id => offer.bumps.some(b => b.bump_offer_id === id)).slice(0, 3);

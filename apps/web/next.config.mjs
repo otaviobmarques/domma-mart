@@ -8,7 +8,7 @@ const csp = [
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",
   "media-src 'self' blob:",
-  "connect-src 'self' https://www.google-analytics.com https://api.pwnedpasswords.com",
+  "connect-src 'self' https://www.google-analytics.com https://api.pwnedpasswords.com https://api.pagar.me",
   "frame-src https://challenges.cloudflare.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",

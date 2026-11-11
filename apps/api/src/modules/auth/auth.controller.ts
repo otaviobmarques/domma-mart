@@ -166,7 +166,8 @@ export class AuthController {
       user: { id: u.id, name: u.name, email: u.email, email_verified: !!u.email_verified_at, totp_enabled: !!u.totp_enabled_at, platform_role: u.platform_role },
       workspace: ws && { id: ws.id, name: ws.name, kyc_status: ws.kyc_status, blocked: !!ws.blocked_at, blocked_reason: ws.blocked_reason, support_whatsapp: ws.support_whatsapp, support_email: ws.support_email },
       workspaces: memberships.map(m => ({ id: m.workspace_id, name: m.workspace.name, role: m.role })),
-      role: c.role, permissions: c.permissions, gateway: this.gateway.name,
+      role: c.role, permissions: c.permissions, gateway: this.gateway.name, payout_mode: this.gateway.payoutMode,
+      receiving_ready: !!ws?.gateway_subaccount_id || !this.gateway.requiresSubaccountToSell,
     });
   }
 

@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { get, post, ApiError } from '@/lib/api';
-import { maskDoc, digits, isValidCPF, isValidCNPJ } from '@/lib/format';
+import { maskDoc, maskPhone, maskMoney, moneyToCents, digits, isValidCPF, isValidCNPJ } from '@/lib/format';
 import { useMe } from '@/components/session';
 import { Button, Card, Field, Banner, Skeleton, cx } from '@/components/ui';
 
@@ -20,6 +20,12 @@ export default function Identidade() {
   const [step, setStep] = useState(1);
   const [type, setType] = useState<'pf' | 'pj'>('pf');
   const [d, setD] = useState({ name: '', document: '', birth_date: '', partner_name: '', partner_document: '' });
+  // dados exigidos pelo gateway para abrir a conta de recebimento (Pagar.me)
+  const [x, setX] = useState({ phone: '', zip: '', street: '', number: '', complement: '', district: '', city: '', state: '', occupation: '', income: '', mother_name: '', trading_name: '', revenue: '', partner_email: '', partner_birth_date: '', partner_occupation: '', partner_income: '' });
+  async function lookupZip(zip: string) {
+    if (digits(zip).length !== 8) return;
+    try { const r = await fetch(`https://viacep.com.br/ws/${digits(zip)}/json/`); const j = await r.json(); if (!j.erro) setX(v => ({ ...v, street: v.street || j.logradouro || '', district: v.district || j.bairro || '', city: j.localidade || v.city, state: j.uf || v.state })); } catch { /* preenchimento manual */ }
+  }
   const [imgs, setImgs] = useState<{ doc_front?: string; doc_back?: string; selfie?: string }>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
@@ -45,11 +51,33 @@ export default function Identidade() {
     if (type === 'pf' && !d.birth_date) e.birth_date = 'Informe sua data de nascimento.';
     if (type === 'pj' && d.partner_name.trim().length < 3) e.partner_name = 'Informe o nome do sócio responsável.';
     if (type === 'pj' && !isValidCPF(d.partner_document)) e.partner_document = 'CPF do sócio inválido.';
+    if (status.extra_required) {
+      if (digits(x.phone).length !== 11) e.phone = 'Celular com DDD.';
+      if (digits(x.zip).length !== 8) e.zip = 'CEP com 8 números.';
+      if (x.street.trim().length < 2) e.street = 'Informe a rua.';
+      if (!x.number.trim()) e.number = 'Informe o número (ou S/N).';
+      if (x.district.trim().length < 2) e.district = 'Informe o bairro.';
+      if (x.city.trim().length < 2) e.city = 'Informe a cidade.';
+      if (!/^[A-Za-z]{2}$/.test(x.state)) e.state = 'UF com 2 letras.';
+      if (type === 'pf' && x.occupation.trim().length < 2) e.occupation = 'Informe sua profissão.';
+      if (type === 'pf' && !moneyToCents(x.income)) e.income = 'Informe sua renda mensal aproximada.';
+      if (type === 'pj' && !moneyToCents(x.revenue)) e.revenue = 'Informe o faturamento anual aproximado.';
+      if (type === 'pj' && !/^\S+@\S+\.\S+$/.test(x.partner_email)) e.partner_email = 'E-mail do sócio inválido.';
+      if (type === 'pj' && !x.partner_birth_date) e.partner_birth_date = 'Data de nascimento do sócio.';
+      if (type === 'pj' && x.partner_occupation.trim().length < 2) e.partner_occupation = 'Profissão do sócio.';
+      if (type === 'pj' && !moneyToCents(x.partner_income)) e.partner_income = 'Renda mensal do sócio.';
+    }
     setErrors(e); if (!Object.keys(e).length) setStep(3);
   }
   async function submit() {
     setBusy(true); setErr(null);
-    try { await post('/v1/identity', { person_type: type, ...d, document: digits(d.document), partner_document: d.partner_document ? digits(d.partner_document) : undefined, birth_date: d.birth_date || undefined, partner_name: d.partner_name || undefined, ...imgs }); setStep(4); reload(); setStatus(await get('/v1/identity')); }
+    const extra = status.extra_required ? {
+      phone: digits(x.phone), address: { zip: digits(x.zip), street: x.street.trim(), number: x.number.trim(), complement: x.complement.trim() || undefined, district: x.district.trim(), city: x.city.trim(), state: x.state.toUpperCase() },
+      ...(type === 'pf'
+        ? { occupation: x.occupation.trim(), monthly_income_cents: moneyToCents(x.income), mother_name: x.mother_name.trim() || undefined }
+        : { trading_name: x.trading_name.trim() || undefined, annual_revenue_cents: moneyToCents(x.revenue), partner_email: x.partner_email.trim().toLowerCase(), partner_birth_date: x.partner_birth_date, partner_occupation: x.partner_occupation.trim(), partner_monthly_income_cents: moneyToCents(x.partner_income) }),
+    } : undefined;
+    try { await post('/v1/identity', { person_type: type, ...d, document: digits(d.document), partner_document: d.partner_document ? digits(d.partner_document) : undefined, birth_date: d.birth_date || undefined, partner_name: d.partner_name || undefined, ...imgs, extra }); setStep(4); reload(); setStatus(await get('/v1/identity')); }
     catch (e) { const x = e as ApiError; setErr(Object.values(x.fields ?? {})[0] ?? x.title); }
     setBusy(false);
   }
@@ -80,6 +108,36 @@ export default function Identidade() {
           <Field label={type === 'pf' ? 'CPF' : 'CNPJ'} inputMode="numeric" value={d.document} onChange={e => setD({ ...d, document: maskDoc(e.target.value) })} error={errors.document} />
           {type === 'pf' ? <Field label="Data de nascimento" type="date" value={d.birth_date} onChange={e => setD({ ...d, birth_date: e.target.value })} error={errors.birth_date} />
             : <><Field label="Nome do sócio responsável" value={d.partner_name} onChange={e => setD({ ...d, partner_name: e.target.value })} error={errors.partner_name} /><Field label="CPF do sócio" inputMode="numeric" value={d.partner_document} onChange={e => setD({ ...d, partner_document: maskDoc(e.target.value) })} error={errors.partner_document} /></>}
+          {status.extra_required && <>
+            <p className="pt-2 font-bold">{type === 'pf' ? 'Endereço e renda' : 'Endereço, faturamento e sócio'}</p>
+            <p className="-mt-2 text-[13.5px] text-ink-mute">O Banco Central exige estes dados para abrir sua conta de recebimento.</p>
+            <Field label="Celular" inputMode="tel" value={x.phone} onChange={e => setX({ ...x, phone: maskPhone(e.target.value) })} error={errors.phone} />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="CEP" inputMode="numeric" value={x.zip} onChange={e => { const v = digits(e.target.value).slice(0, 8); setX({ ...x, zip: v.length > 5 ? `${v.slice(0, 5)}-${v.slice(5)}` : v }); lookupZip(v); }} error={errors.zip} />
+              <Field label="UF" value={x.state} onChange={e => setX({ ...x, state: e.target.value.replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase() })} error={errors.state} />
+            </div>
+            <Field label="Rua" value={x.street} onChange={e => setX({ ...x, street: e.target.value })} error={errors.street} />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Número" value={x.number} onChange={e => setX({ ...x, number: e.target.value.slice(0, 10) })} error={errors.number} />
+              <Field label="Complemento (opcional)" value={x.complement} onChange={e => setX({ ...x, complement: e.target.value.slice(0, 60) })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Bairro" value={x.district} onChange={e => setX({ ...x, district: e.target.value })} error={errors.district} />
+              <Field label="Cidade" value={x.city} onChange={e => setX({ ...x, city: e.target.value })} error={errors.city} />
+            </div>
+            {type === 'pf' ? <>
+              <Field label="Profissão" value={x.occupation} onChange={e => setX({ ...x, occupation: e.target.value.slice(0, 80) })} error={errors.occupation} />
+              <Field label="Renda mensal aproximada" inputMode="numeric" value={x.income} onChange={e => setX({ ...x, income: maskMoney(e.target.value) })} error={errors.income} right={<span className="text-ink-mute">R$</span>} />
+              <Field label="Nome da mãe (opcional)" value={x.mother_name} onChange={e => setX({ ...x, mother_name: e.target.value.slice(0, 160) })} />
+            </> : <>
+              <Field label="Nome fantasia (opcional)" value={x.trading_name} onChange={e => setX({ ...x, trading_name: e.target.value.slice(0, 160) })} />
+              <Field label="Faturamento anual aproximado" inputMode="numeric" value={x.revenue} onChange={e => setX({ ...x, revenue: maskMoney(e.target.value) })} error={errors.revenue} right={<span className="text-ink-mute">R$</span>} />
+              <Field label="E-mail do sócio" type="email" value={x.partner_email} onChange={e => setX({ ...x, partner_email: e.target.value })} error={errors.partner_email} />
+              <Field label="Data de nascimento do sócio" type="date" value={x.partner_birth_date} onChange={e => setX({ ...x, partner_birth_date: e.target.value })} error={errors.partner_birth_date} />
+              <Field label="Profissão do sócio" value={x.partner_occupation} onChange={e => setX({ ...x, partner_occupation: e.target.value.slice(0, 80) })} error={errors.partner_occupation} />
+              <Field label="Renda mensal do sócio" inputMode="numeric" value={x.partner_income} onChange={e => setX({ ...x, partner_income: maskMoney(e.target.value) })} error={errors.partner_income} right={<span className="text-ink-mute">R$</span>} />
+            </>}
+          </>}
           <div className="flex justify-between"><Button variant="ghost" onClick={() => setStep(1)}>Voltar</Button><Button onClick={next2}>Continuar</Button></div>
         </>}
         {step === 3 && <>
@@ -95,8 +153,13 @@ export default function Identidade() {
         </>}
         {step === 4 && <>
           <p className="text-[20px] font-extrabold">Em análise — avisamos em até 1 dia útil</p>
-          <p className="text-ink-soft">Último passo: cadastre a chave Pix no seu {type === 'pf' ? 'CPF' : 'CNPJ'} para receber os saques.</p>
-          <a href="/financeiro"><Button full>Cadastrar chave Pix</Button></a>
+          {status.extra_required ? <>
+            <p className="text-ink-soft">Último passo: cadastre uma conta bancária no seu {type === 'pf' ? 'CPF' : 'CNPJ'}. Com ela abrimos sua conta de recebimento e você já pode vender.</p>
+            <a href="/financeiro"><Button full>Cadastrar conta bancária</Button></a>
+          </> : <>
+            <p className="text-ink-soft">Último passo: cadastre a chave Pix no seu {type === 'pf' ? 'CPF' : 'CNPJ'} para receber os saques.</p>
+            <a href="/financeiro"><Button full>Cadastrar chave Pix</Button></a>
+          </>}
         </>}
       </Card>
     </div>

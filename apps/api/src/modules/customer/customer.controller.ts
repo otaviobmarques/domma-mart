@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Req, Res, Headers } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Req, Res, Headers, Inject } from '@nestjs/common';
 import type { Response } from 'express';
 import { randomInt } from 'node:crypto';
 import { PrismaService } from '../../infra/prisma.service';
@@ -13,13 +13,13 @@ import { normalizeBRMobile, onlyDigits, isValidDocument } from '../../domain/val
 import { toJSON } from '../../http/json';
 import { cookieOpts } from '../auth/auth.controller';
 import { receiptPdf } from './receipt';
-import { parseSandboxToken } from '../gateway/sandbox.adapter';
+import { GATEWAY, GatewayAdapter } from '../gateway/gateway.types';
 
 const SESSION_MS = 30 * 86400000; // RN-82
 
 @Controller('v1/customer')
 export class CustomerController {
-  constructor(private prisma: PrismaService, private notify: NotifyService, private orders: OrdersService) {}
+  constructor(private prisma: PrismaService, private notify: NotifyService, private orders: OrdersService, @Inject(GATEWAY) private gateway: GatewayAdapter) {}
 
   private async session(res: Response, customerId: string) {
     const t = randomToken(32);
@@ -172,8 +172,11 @@ export class CustomerController {
     const { card_token } = parse(z.object({ card_token: z.string().max(500) }), b);
     const s = await this.prisma.subscriptions.findFirst({ where: { id, customer_id: cu.customerId } });
     if (!s) throw new AppError('NOT_FOUND');
-    const tok = parseSandboxToken(card_token);
-    await this.prisma.subscriptions.update({ where: { id }, data: { card_token_ref: `card_${card_token.slice(-12)}`, card_brand: tok?.brand ?? s.card_brand, card_last4: tok?.last4 ?? s.card_last4, ...(s.status === 'past_due' ? { next_charge_at: new Date() } : {}) } });
+    const c = await this.prisma.customers.findUniqueOrThrow({ where: { id: cu.customerId } });
+    let saved;
+    try { saved = await this.gateway.saveCard!({ customer: { name: c.name, email: c.email, document: decrypt(c.document_enc), phone: decrypt(c.phone_enc) }, cardToken: card_token }); }
+    catch { throw new AppError('VALIDATION_ERROR', { fields: { card_token: 'Não conseguimos validar este cartão. Confira os dados.' } }); }
+    await this.prisma.subscriptions.update({ where: { id }, data: { card_token_ref: saved.tokenRef, card_brand: saved.brand, card_last4: saved.last4, ...(s.status === 'past_due' ? { next_charge_at: new Date() } : {}) } });
     return { ok: true };
   }
 

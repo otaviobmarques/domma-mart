@@ -47,10 +47,13 @@ export default function PainelLayout({ children }: { children: React.ReactNode }
           <header className="flex items-center justify-between border-b border-line bg-white px-4 py-3 md:hidden"><Logo className="text-[15px]" /><a href={HELP} target="_blank" className="text-[14px] font-semibold text-ok">Ajuda</a></header>
           <div className="mx-auto max-w-6xl space-y-2 px-4 pt-4 md:px-8">
             {me.workspace?.blocked && <Banner tone="bad" action={<a href={HELP} className="font-bold underline">Falar com o suporte</a>}>Sua conta está temporariamente bloqueada{me.workspace.blocked_reason ? `: ${me.workspace.blocked_reason}` : '.'}</Banner>}
+            {me.workspace && !me.workspace.blocked && me.receiving_ready === false && me.workspace.kyc_status === 'in_review' && !path.startsWith('/financeiro') && (
+              <Banner tone="warn" action={<a href="/financeiro"><Button size="sm" variant="secondary">Cadastrar conta</Button></a>}>Para começar a vender, cadastre a conta bancária que vai receber seu dinheiro.</Banner>
+            )}
             {me.workspace && !me.workspace.blocked && me.workspace.kyc_status !== 'approved' && !path.startsWith('/identidade') && (
               me.workspace.kyc_status === 'in_review'
                 ? <Banner tone="info">Recebemos seus documentos. Avisamos em até 1 dia útil.</Banner>
-                : <Banner tone="warn" action={<a href="/identidade"><Button size="sm" variant="secondary">Confirmar identidade</Button></a>}>Confirme sua identidade para poder sacar.</Banner>
+                : <Banner tone="warn" action={<a href="/identidade"><Button size="sm" variant="secondary">Confirmar identidade</Button></a>}>{me.receiving_ready === false ? 'Confirme sua identidade para poder vender e sacar.' : 'Confirme sua identidade para poder sacar.'}</Banner>
             )}
             {!me.user.email_verified && <Banner tone="info" action={<button className="font-bold underline" onClick={() => post('/v1/auth/resend-verification').then(() => alert('Enviamos um novo link para o seu e-mail.'))}>Reenviar</button>}>Confirme seu e-mail pelo link que enviamos para {me.user.email}.</Banner>}
           </div>

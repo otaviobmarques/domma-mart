@@ -135,6 +135,7 @@ model kyc_submissions {
   document_last4  String
   birth_date      String?
   partner_name    String?
+  extra_enc       Bytes? // dados exigidos pelo gateway para o recebedor (endereço, renda, telefone…), JSON cifrado
   doc_front_key   String?
   doc_back_key    String?
   selfie_key      String?
@@ -163,8 +164,10 @@ model legal_acceptances {
 model payout_accounts {
   id            String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
   workspace_id  String    @unique @db.Uuid
-  pix_key_enc   Bytes
-  pix_key_mask  String
+  kind          String    @default("pix") // pix | bank_account (depende do gateway)
+  pix_key_enc   Bytes?
+  pix_key_mask  String // destino mascarado (chave Pix ou banco/agência/conta)
+  bank_enc      Bytes? // conta bancária (JSON cifrado) quando kind = bank_account
   holder_name   String
   holder_doc_hash String
   active_from   DateTime  @db.Timestamptz // carência de 24 h (RN-37)
