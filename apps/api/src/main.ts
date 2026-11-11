@@ -12,6 +12,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import express from 'express';
 import { AppModule } from './app.module';
+import { buildOpenApi } from './openapi';
 
 (BigInt.prototype as any).toJSON = function () { return Number(this); };
 
@@ -31,8 +32,26 @@ async function bootstrap() {
     if ((process.env.APP_URL || '').startsWith('https')) res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
     next();
   });
+  // Documentação gerada do código (25.2)
+  if (process.argv.includes('--openapi')) {
+    await app.init();
+    const { writeFileSync } = await import('node:fs');
+    const out = resolve(__dirname, '../../../docs/openapi.json');
+    writeFileSync(out, JSON.stringify(buildOpenApi(app), null, 2) + '\n');
+    console.log(`OpenAPI gravado em ${out}`);
+    await app.close();
+    process.exit(0);
+  }
+  let spec: unknown;
+  app.getHttpAdapter().get('/v1/openapi.json', (_req: any, res: any) => { spec ??= buildOpenApi(app); res.json(spec); });
   const port = Number(process.env.PORT || process.env.API_PORT || 4000);
-  await app.listen(port, process.env.LISTEN_HOST || '::');
+  // '::' atende IPv4 e IPv6 (rede privada do Railway é IPv6); sem IPv6 na máquina, cai para 0.0.0.0
+  try {
+    await app.listen(port, process.env.LISTEN_HOST || '::');
+  } catch (e: any) {
+    if (process.env.LISTEN_HOST || e?.code !== 'EAFNOSUPPORT') throw e;
+    await app.listen(port, '0.0.0.0');
+  }
   console.log(`Domma Mart API em http://localhost:${port}`);
 }
 bootstrap();
