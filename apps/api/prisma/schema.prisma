@@ -846,3 +846,18 @@ model fee_tiers_cache {
   fee_bps         Int
   computed_at     DateTime @db.Timestamptz
 }
+
+// Domínio próprio do produtor para o checkout (5.3), com SSL automático no Vercel
+model custom_domains {
+  id           String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  hostname     String    @unique
+  status       String    @default("pending") // pending | active | error
+  dns          Json? // registros que o produtor precisa criar
+  last_error   String?
+  verified_at  DateTime? @db.Timestamptz
+  created_at   DateTime  @default(now()) @db.Timestamptz
+  updated_at   DateTime  @updatedAt @db.Timestamptz
+
+  @@index([workspace_id])
+}

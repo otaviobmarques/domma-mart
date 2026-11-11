@@ -5,7 +5,7 @@ import { ago, dateTime, maskPhone } from '@/lib/format';
 import { useMe } from '@/components/session';
 import { Button, Card, Field, Textarea, Toggle, Banner, Pill, Modal, CopyButton, cx } from '@/components/ui';
 
-const TABS = [['seguranca', 'Perfil e segurança'], ['equipe', 'Equipe'], ['empresa', 'Dados da empresa'], ['notificacoes', 'Notificações'], ['recuperacao', 'Recuperação de vendas'], ['integracoes', 'Integrações']] as const;
+const TABS = [['seguranca', 'Perfil e segurança'], ['equipe', 'Equipe'], ['empresa', 'Dados da empresa'], ['notificacoes', 'Notificações'], ['recuperacao', 'Recuperação de vendas'], ['integracoes', 'Integrações'], ['dominio', 'Domínio próprio']] as const;
 const PERM: Record<string, string> = { 'dashboard.view': 'Ver início', 'products.edit': 'Editar produtos', 'orders.view': 'Ver vendas', 'orders.refund': 'Reembolsar', 'finance.view': 'Ver financeiro', 'finance.withdraw': 'Sacar', 'affiliates.manage': 'Gerir afiliados', 'settings.manage': 'Configurações', 'team.manage': 'Gerir equipe' };
 
 export default function Config() {
@@ -24,6 +24,7 @@ export default function Config() {
         {tab === 'notificacoes' && <Notificacoes />}
         {tab === 'recuperacao' && <Recuperacao setMsg={setMsg} />}
         {tab === 'integracoes' && <Integracoes setMsg={setMsg} />}
+        {tab === 'dominio' && <Dominio setMsg={setMsg} />}
       </div>
     </div>
   );
@@ -141,6 +142,50 @@ function Integracoes({ setMsg }: any) {
       </Card>
       <Card><h2 className="font-extrabold">Outras integrações</h2><ul className="mt-2 space-y-2 text-[14.5px]"><li><b>Domma CRM e Domma Chat</b> — lead e venda com fonte de dados; recuperação por WhatsApp. <span className="text-ink-mute">Configurado pela equipe Domma.</span></li><li><b>Pixel Meta, GA4, Google Ads, TikTok</b> — em cada produto, aba Pixels.</li><li><b>UTMify</b> — use um webhook com os eventos <span className="num">order.paid</span> e <span className="num">order.refunded</span>.</li><li><b>API pública</b> — chegando na Fase 2.</li></ul></Card>
       <Modal open={!!secret} onClose={() => setSecret(null)} title="Guarde este segredo"><p className="text-ink-soft">Use para validar a assinatura. Ele não será mostrado de novo.</p><p id="copy-src" className="num mt-3 break-all rounded-ctl bg-canvas p-3 text-[13px]">{secret}</p><div className="mt-3"><CopyButton text={secret ?? ''} full variant="primary" /></div></Modal>
+    </div>
+  );
+}
+
+function Dominio({ setMsg }: any) {
+  const [d, setD] = useState<any>(null);
+  const [host, setHost] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = () => get('/v1/settings/domains').then(setD);
+  useEffect(() => { load(); }, []);
+  if (!d) return null;
+  const err = (e: unknown) => { const x = e as ApiError; setMsg({ tone: 'bad', text: Object.values(x.fields ?? {})[0] ?? x.title }); };
+  return (
+    <div className="space-y-4">
+      <Card className="space-y-3">
+        <h2 className="font-extrabold">Use o seu domínio na página de pagamento</h2>
+        <p className="text-[14.5px] text-ink-soft">Seu cliente compra em <span className="num">pay.seusite.com.br/{d.example_slug ?? 'seu-produto'}</span>, com cadeado de segurança (SSL) automático. Nesse endereço aparecem só os seus produtos.</p>
+        {!d.enabled ? <Banner tone="info">O domínio próprio ainda não está ligado nesta conta. Fale com o suporte para ativar.</Banner> : (
+          <div className="flex flex-wrap items-end gap-2">
+            <Field label="Seu domínio" placeholder="pay.seusite.com.br" value={host} onChange={e => setHost(e.target.value.toLowerCase())} className="min-w-[240px] flex-1" />
+            <Button loading={busy === 'add'} onClick={async () => { setBusy('add'); setMsg(null); try { await post('/v1/settings/domains', { hostname: host }); setHost(''); load(); setMsg({ tone: 'ok', text: 'Domínio cadastrado. Agora crie o registro no DNS abaixo.' }); } catch (e) { err(e); } setBusy(null); }}>Adicionar domínio</Button>
+          </div>
+        )}
+      </Card>
+      {d.domains.map((x: any) => (
+        <Card key={x.id} className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="num text-[16px] font-bold">{x.hostname}</span>
+            <span className="flex items-center gap-2">{x.status === 'active' ? <Pill tone="ok">Ativo</Pill> : <Pill tone="warn">Aguardando DNS</Pill>}
+              {x.status !== 'active' && d.enabled && <Button size="sm" variant="secondary" loading={busy === x.id} onClick={async () => { setBusy(x.id); try { const r = await post(`/v1/settings/domains/${x.id}/verify`); setMsg(r.status === 'active' ? { tone: 'ok', text: `${x.hostname} está ativo!` } : { tone: 'bad', text: r.last_error ?? 'Ainda não encontramos o registro no DNS.' }); load(); } catch (e) { err(e); } setBusy(null); }}>Verificar agora</Button>}
+              <Button size="sm" variant="ghost" className="text-bad" onClick={async () => { if (confirm(`Remover ${x.hostname}?`)) { await api('DELETE', `/v1/settings/domains/${x.id}`); load(); } }}>Remover</Button></span>
+          </div>
+          {x.status === 'active' ? (
+            <p className="text-[14.5px]">Seus links: <span className="num">https://{x.hostname}/{d.example_slug ?? 'codigo-da-oferta'}</span></p>
+          ) : (
+            <>
+              <p className="text-[14.5px] text-ink-soft">No painel onde você comprou o domínio (Registro.br, GoDaddy, Hostinger…), crie {x.dns?.length > 1 ? 'estes registros' : 'este registro'}:</p>
+              <div className="overflow-x-auto"><table className="w-full min-w-[420px] text-left text-[14px]"><thead className="text-[12.5px] text-ink-mute"><tr><th className="py-1 pr-3">Tipo</th><th className="pr-3">Nome</th><th>Valor</th></tr></thead>
+                <tbody>{(x.dns ?? []).map((r: any, i: number) => <tr key={i} className="border-t border-line"><td className="num py-2 pr-3 font-bold">{r.type}</td><td className="num pr-3">{r.name}</td><td className="num break-all">{r.value} <CopyButton text={r.value} size="sm" variant="ghost" /></td></tr>)}</tbody></table></div>
+              <p className="text-[13px] text-ink-mute">A mudança de DNS pode levar algumas horas para valer. Depois clique em “Verificar agora”.</p>
+            </>
+          )}
+        </Card>
+      ))}
     </div>
   );
 }
