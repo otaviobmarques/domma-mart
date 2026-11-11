@@ -86,6 +86,9 @@ jobs:
           PORT: '4100'
         run: |
           set -o pipefail
+          # a API do sandbox (passo anterior) divide a mesma fila no Redis: desliga antes
+          pkill -f "node dist/main.js" || true
+          sleep 1
           node dist/main.js > api-pagarme.log 2>&1 &
           for i in $(seq 1 60); do curl -sf localhost:4100/health && break; sleep 1; done
           API=http://localhost:4100 node scripts/pagarme.test.mjs

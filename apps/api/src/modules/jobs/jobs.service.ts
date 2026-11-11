@@ -61,7 +61,7 @@ export class JobsService implements OnApplicationBootstrap {
         if (ev.type === 'charge.paid') {
           // RN-14: confirma também por consulta ativa antes de liberar
           const live = await this.gateway.getCharge(ev.chargeId);
-          if (live && live.status !== 'paid') throw new Error(`consulta ativa divergente: ${live.status}`);
+          if (!live || live.status !== 'paid') throw new Error(`consulta ativa divergente: ${live?.status ?? 'cobrança não encontrada no gateway'}`);
           await this.prisma.payments.update({ where: { id: pay.id }, data: { status: 'paid', raw_status: 'PAID' } });
           await this.orders.markPaid(pay.order_id, `webhook:${row.event_id}`);
         } else if (ev.type === 'charge.expired') await this.orders.markExpired(pay.order_id);
