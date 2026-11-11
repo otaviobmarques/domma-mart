@@ -20,7 +20,14 @@ async function verifyTurnstile(token: string | undefined, ip: string) {
 }
 
 const OrderSchema = z.object({
-  customer: z.object({ name: z.string().max(120), email: z.string().max(200), phone: z.string().max(30), document: z.string().max(20) }),
+  customer: z.object({ name: z.string().max(120), email: z.string().max(200), phone: z.string().max(30), document: z.string().max(20) }).optional(),
+  save_card: z.boolean().optional(),
+  one_click: z.object({ token: z.string().max(600), card_id: z.string().uuid() }).optional(),
+  billing_address: z.object({
+    zip: z.string().regex(/^\d{5}-?\d{3}$/), street: z.string().min(2).max(120), number: z.string().min(1).max(10), complement: z.string().max(60).optional(),
+    district: z.string().min(2).max(60), city: z.string().min(2).max(60), state: z.string().regex(/^[A-Za-z]{2}$/),
+  }).optional(),
+  three_ds: z.object({ transaction_id: z.string().min(8).max(256), status: z.string().max(2) }).optional(),
   method: z.enum(['pix', 'card', 'boleto']),
   installments: z.number().int().min(1).max(12).optional(),
   card_token: z.string().max(500).optional(),
@@ -63,6 +70,29 @@ export class CheckoutController {
   async lead(@Body() b: any) {
     const d = parse(z.object({ offer_id: z.string().uuid(), email: z.string().max(200), name: z.string().max(120).optional(), phone: z.string().max(30).optional() }), b);
     return this.svc.saveLead(d.offer_id, d.email.trim().toLowerCase(), d.name, d.phone);
+  }
+
+  /** Compra com 1 clique, passo 1: envia código ao e-mail do comprador com cartão guardado. */
+  @Post('v1/public/one-click/start') @HttpCode(200)
+  async oneClickStart(@Body() b: any, @Req() req: R) {
+    const { email } = parse(z.object({ email: z.string().email().max(200) }), b);
+    return this.svc.startOneClick(email, clientIp(req));
+  }
+
+  /** Passo 2: confere o código e devolve os cartões guardados (só bandeira e final). */
+  @Post('v1/public/one-click/verify') @HttpCode(200)
+  async oneClickVerify(@Body() b: any, @Req() req: R) {
+    const d = parse(z.object({ email: z.string().email().max(200), code: z.string().regex(/^\d{6}$/, 'Digite os 6 números.') }), b);
+    return this.svc.verifyOneClick(d.email, d.code, clientIp(req));
+  }
+
+  /** Token para o navegador iniciar a autenticação 3-D Secure (a chave secreta fica no servidor). */
+  @Post('v1/public/3ds-token') @HttpCode(200)
+  async threeDSToken(@Req() req: R) {
+    if (!this.gateway.threeDSToken || !this.gateway.publicConfig().threeDS) throw new AppError('NOT_FOUND');
+    await rl.limit(`3ds:${hashIp(clientIp(req))}`, 30, 600);
+    try { return { token: await this.gateway.threeDSToken() }; }
+    catch { throw new AppError('INTERNAL_ERROR', { title: 'Não conseguimos falar com o banco. Tente de novo.' }); }
   }
 
   @Post('v1/checkout/:offerId/orders')

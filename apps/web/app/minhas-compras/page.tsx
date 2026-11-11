@@ -18,7 +18,11 @@ export default function MinhasCompras() {
   const [cpf, setCpf] = useState('');
   const [cpfMsg, setCpfMsg] = useState<string | null>(null);
 
-  const load = () => get('/v1/customer/purchases').then(setD).catch((e: ApiError) => { if (e.status === 401) location.href = '/minhas-compras/entrar'; });
+  const [cards, setCards] = useState<{ id: string; brand: string; last4: string }[]>([]);
+  const load = () => {
+    get('/v1/customer/purchases').then(setD).catch((e: ApiError) => { if (e.status === 401) location.href = '/minhas-compras/entrar'; });
+    get<any[]>('/v1/customer/cards').then(setCards).catch(() => {});
+  };
   useEffect(() => { load(); }, []);
 
   async function confirmRefund() {
@@ -88,6 +92,12 @@ export default function MinhasCompras() {
           );
         })}
       </div>
+
+      {cards.length > 0 && <Card className="mt-6">
+        <h2 className="font-extrabold">Cartões guardados</h2>
+        <p className="mt-1 text-[14px] text-ink-mute">Para comprar com 1 clique. Guardamos só a bandeira e o final; o número fica com o banco.</p>
+        <ul className="mt-2 divide-y divide-line">{cards.map(k => <li key={k.id} className="flex min-h-[48px] items-center justify-between gap-2"><span className="capitalize">{k.brand} <span className="num">•••• {k.last4}</span></span><button className="min-h-[44px] px-2 font-semibold text-bad underline" onClick={async () => { await api('DELETE', `/v1/customer/cards/${k.id}`); setCards(cards.filter(x => x.id !== k.id)); setFlash('Cartão removido.'); }}>Remover</button></li>)}</ul>
+      </Card>}
 
       <div className="mt-6 rounded-card border border-dashed border-line bg-white/70 p-4 text-[14.5px]">
         Não achou uma compra? <button className="font-bold text-action underline" onClick={() => setCpfOpen(true)}>Buscar pelo CPF</button>

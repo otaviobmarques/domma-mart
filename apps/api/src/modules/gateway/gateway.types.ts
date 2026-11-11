@@ -18,6 +18,10 @@ export interface CreateChargeInput {
   cardToken?: string;
   /** Cartão já guardado (renovação de assinatura): referência devolvida em card.tokenRef. */
   savedCardRef?: string;
+  /** Uso do cartão guardado: renovação de assinatura (recorrente) ou compra com 1 clique iniciada pelo comprador. */
+  cardOnFile?: 'recurring' | 'one_click';
+  /** Autenticação 3-D Secure feita no navegador (id da transação no servidor 3DS). */
+  threeDS?: { transactionId: string; status: string };
   /** Endereço de cobrança do cartão, quando o comprador informou. */
   billingAddress?: Address;
   pixExpiresAt?: Date;
@@ -63,7 +67,9 @@ export interface GatewayAdapter {
   /** Se o vendedor precisa ter subconta antes de vender (o gateway não guarda saldo de terceiros na conta da plataforma). */
   readonly requiresSubaccountToSell: boolean;
   /** Configuração pública que o navegador usa para tokenizar o cartão. */
-  publicConfig(): { provider: string; publicKey: string | null };
+  publicConfig(): { provider: string; publicKey: string | null; threeDS?: { scriptUrl: string } | null };
+  /** Token de uso único para o navegador iniciar a autenticação 3-D Secure (gerado com a chave secreta). */
+  threeDSToken?(): Promise<string>;
   createSubaccount(input: { workspaceId: string; name: string; document: string; profile?: RecipientProfile }): Promise<{ id: string }>;
   /** Troca a conta bancária de saque da subconta (modo bank_account). */
   updateBankAccount?(subaccountId: string, account: BankAccount): Promise<void>;

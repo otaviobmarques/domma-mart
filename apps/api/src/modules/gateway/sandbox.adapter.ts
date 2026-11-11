@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import QRCode from 'qrcode';
+import { pixQrDataUrl } from './qr';
 import { createHmac } from 'node:crypto';
 import { GatewayAdapter, CreateChargeInput, ChargeResult, GatewayEvent, ChargeStatus } from './gateway.types';
 import { redis } from '../../infra/redis';
@@ -44,7 +44,7 @@ export class SandboxGateway implements GatewayAdapter {
 
     if (i.method === 'pix') {
       const copyPaste = brCode({ txid: chargeId, amountCents: i.amountCents, merchant: 'DOMMA MART', city: 'BELO HORIZONTE' });
-      const qrDataUrl = await QRCode.toDataURL(copyPaste, { margin: 1, width: 464 });
+      const qrDataUrl = await pixQrDataUrl(copyPaste);
       result = { chargeId, status: 'pending', rawStatus: 'PENDING', pix: { qrDataUrl, copyPaste, expiresAt: i.pixExpiresAt! } };
       await this.save(chargeId, { status: 'pending', method: 'pix', amount: String(i.amountCents), expires: String(i.pixExpiresAt!.getTime()) });
     } else if (i.method === 'boleto') {

@@ -4,7 +4,9 @@ import { GATEWAY, GatewayAdapter } from '../gateway/gateway.types';
 import { AppError, ErrorCode } from '../../common/errors';
 import { computeFee, computeSplit, installmentPlan, installmentOptions, applyCoupon, FEES, Method } from '../../domain/money';
 import { isValidDocument, isValidName, isValidEmailFormat, isDisposableEmail, normalizeBRMobile, onlyDigits } from '../../domain/validators';
-import { encrypt, blindIndex, orderCode, hashIp, decrypt } from '../../common/crypto';
+import { encrypt, blindIndex, orderCode, hashIp, decrypt, signToken, verifyToken, sha256, safeEqual } from '../../common/crypto';
+import { randomInt } from 'node:crypto';
+import { redis } from '../../infra/redis';
 import * as rl from '../../infra/rate-limit';
 import { QueueService } from '../../infra/queue.service';
 import { NotifyService } from '../../infra/notify.service';
@@ -12,7 +14,13 @@ import { urls } from '../../common/urls';
 import { formatBRL } from '../../domain/money';
 
 export interface CreateOrderBody {
-  customer: { name: string; email: string; phone: string; document: string };
+  customer?: { name: string; email: string; phone: string; document: string };
+  /** Guardar o cartão desta compra para comprar com 1 clique depois (consentimento explícito). */
+  save_card?: boolean;
+  /** Compra com 1 clique: sessão aberta pelo código do e-mail + cartão guardado escolhido. */
+  one_click?: { token: string; card_id: string };
+  billing_address?: { zip: string; street: string; number: string; complement?: string; district: string; city: string; state: string };
+  three_ds?: { transaction_id: string; status: string };
   method: Method;
   installments?: number;
   card_token?: string;
@@ -71,7 +79,7 @@ export class CheckoutService {
       seller: { name: p.workspace.name || owner?.name, whatsapp: p.workspace.support_whatsapp },
       theme: offer.theme ?? {},
       bumps: offer.bumps.map(b => { const o = bumps.find(x => x.id === b.bump_offer_id); return o && { offer_id: o.id, name: o.product.name, headline: b.headline, price_cents: o.price_cents, cover_url: o.product.cover_url }; }).filter(Boolean),
-      gateway: this.gateway.name, gateway_public_key: this.gateway.publicConfig().publicKey,
+      gateway: this.gateway.name, gateway_public_key: this.gateway.publicConfig().publicKey, three_ds: this.gateway.publicConfig().threeDS ?? null, one_click: !!this.gateway.saveCard,
       turnstile_site_key: process.env.TURNSTILE_SITE_KEY || null,
     };
   }
@@ -122,8 +130,23 @@ export class CheckoutService {
     if (!offer.methods.includes(body.method)) throw new AppError('VALIDATION_ERROR', { fields: { method: 'Forma de pagamento indisponível.' } });
     if (offer.billing_type === 'subscription' && body.method !== 'card') throw new AppError('VALIDATION_ERROR', { fields: { method: 'Assinaturas são cobradas no cartão.' } });
 
+    // Compra com 1 clique: os dados do comprador e o cartão vêm da sessão aberta pelo código do e-mail
+    let savedCard: { id: string; token_ref: string; brand: string; last4: string } | null = null;
+    let c = body.customer ?? ({} as any);
+    if (body.one_click) {
+      if (body.method !== 'card') throw new AppError('VALIDATION_ERROR', { fields: { method: 'A compra com 1 clique é no cartão.' } });
+      const sess = verifyToken<{ oc: string }>(body.one_click.token);
+      if (!sess?.oc) throw new AppError('AUTH_LINK_EXPIRED', { title: 'Sua confirmação expirou. Peça um novo código.' });
+      const card = await this.prisma.saved_cards.findFirst({ where: { id: body.one_click.card_id, customer_id: sess.oc, provider: this.gateway.name, revoked_at: null } });
+      if (!card) throw new AppError('VALIDATION_ERROR', { fields: { card_id: 'Este cartão não está mais disponível. Use outro cartão.' } });
+      const cu = await this.prisma.customers.findUniqueOrThrow({ where: { id: sess.oc } });
+      c = { name: cu.name, email: cu.email, phone: decrypt(cu.phone_enc), document: decrypt(cu.document_enc) };
+      savedCard = { id: card.id, token_ref: decrypt(card.token_ref_enc), brand: card.brand, last4: card.last4 };
+    } else if (body.method === 'card' && !body.card_token) throw new AppError('VALIDATION_ERROR', { fields: { card_number: 'Confira os dados do cartão.' } });
+    // 3-D Secure: o banco recusou ou o comprador desistiu da confirmação
+    if (body.three_ds && ['N', 'R'].includes(body.three_ds.status)) throw new AppError('CARD_DECLINED', { title: 'O banco não confirmou a compra. Tente outro cartão ou pague com Pix.' });
+
     // Validações do comprador (19.1)
-    const c = body.customer ?? ({} as any);
     const fields: Record<string, string> = {};
     if (!isValidName(c.name)) fields['customer.name'] = 'Digite seu nome completo.';
     if (!isValidEmailFormat(c.email)) fields['customer.email'] = 'Confira seu e-mail. Ele parece estar incompleto.';
@@ -222,7 +245,9 @@ export class CheckoutService {
     try {
       charge = await this.gateway.createCharge({
         idempotencyKey: `charge:${order.id}`, orderId: order.id, method: body.method, amountCents: plan.totalCents, installments: n,
-        description: offer.product.name, customer: { name: c.name, email, document: doc, phone: phone! }, cardToken: body.card_token,
+        description: offer.product.name, customer: { name: c.name, email, document: doc, phone: phone! },
+        cardToken: savedCard ? undefined : body.card_token, savedCardRef: savedCard?.token_ref, cardOnFile: savedCard ? 'one_click' : undefined,
+        billingAddress: body.billing_address, threeDS: body.three_ds && !savedCard ? { transactionId: body.three_ds.transaction_id, status: body.three_ds.status } : undefined,
         pixExpiresAt, boletoDueAt,
         split: split.map(s => ({ kind: s.beneficiary_type, amountCents: s.amount_cents, subaccountId: subaccounts.find(w => w.id === s.beneficiary_id)?.gateway_subaccount_id ?? null })),
       });
@@ -247,6 +272,10 @@ export class CheckoutService {
       await tx.order_events.create({ data: { order_id: order.id, from_status: 'created', to_status: nextStatus, event: charge.status === 'declined' ? 'payment.declined' : 'payment.created', data: { decline_code: charge.declineCode } } });
     });
 
+    if (body.method === 'card' && charge.status !== 'declined') {
+      if (savedCard) await this.prisma.saved_cards.update({ where: { id: savedCard.id }, data: { last_used_at: new Date() } });
+      else if (body.save_card && charge.card?.tokenRef) await this.saveCard(customer.id, charge.card.tokenRef, charge.card.brand, charge.card.last4).catch(e => this.log.warn(`cartão não guardado: ${(e as Error).message}`));
+    }
     if (charge.status === 'declined') {
       await this.onCardDeclined(offer.id, docHash, ipHash);
       await this.queue.add('recovery.start', { orderId: order.id, kind: 'card_declined' });
@@ -263,6 +292,54 @@ export class CheckoutService {
       void this.notify.send({ channel: 'email', to: email, template: 'boleto_generated', workspaceId: ws.id, refType: 'order', refId: order.id, vars: { produtor: ws.name, valor: formatBRL(plan.totalCents), data: boletoDueAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }), linha_digitavel: charge.boleto!.line, link: urls.boleto(order.id) } });
     }
     return this.responseFor({ ...order, status: nextStatus }, payment);
+  }
+
+  private async saveCard(customerId: string, tokenRef: string, brand: string, last4: string) {
+    const hash = blindIndex(`${this.gateway.name}:${tokenRef}`);
+    await this.prisma.saved_cards.upsert({
+      where: { customer_id_token_ref_hash: { customer_id: customerId, token_ref_hash: hash } },
+      create: { customer_id: customerId, provider: this.gateway.name, token_ref_enc: encrypt(tokenRef), token_ref_hash: hash, brand, last4 },
+      update: { revoked_at: null, brand, last4 },
+    });
+  }
+
+  // ───────── Compra com 1 clique (seção 8: confirma com código enviado por e-mail) ─────────
+  /** Envia o código se o e-mail tiver cartão guardado. A resposta é sempre igual (não revela quem é cliente). */
+  async startOneClick(email: string, ip: string) {
+    const e = email.trim().toLowerCase();
+    await rl.limit(`oc:ip:${hashIp(ip)}`, 10, 600);
+    await rl.limit(`oc:email:${blindIndex(e)}`, 3, 600);
+    const cu = await this.prisma.customers.findUnique({ where: { email: e } });
+    const cards = cu ? await this.prisma.saved_cards.count({ where: { customer_id: cu.id, provider: this.gateway.name, revoked_at: null } }) : 0;
+    if (cu && cards) {
+      const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      await redis().set(`oc:code:${cu.id}`, JSON.stringify({ h: sha256(code), tries: 0 }), 'EX', 600);
+      await this.notify.send({ channel: 'email', to: e, template: 'one_click_code', refType: 'customer', refId: cu.id, vars: { codigo: code } });
+    }
+    return { ok: true, message: 'Se este e-mail tiver um cartão guardado, enviamos um código de 6 números.' };
+  }
+
+  /** Confere o código e abre uma sessão de 15 min para pagar com o cartão guardado. */
+  async verifyOneClick(email: string, code: string, ip: string) {
+    const e = email.trim().toLowerCase();
+    await rl.limit(`ocv:ip:${hashIp(ip)}`, 20, 600);
+    const cu = await this.prisma.customers.findUnique({ where: { email: e } });
+    const key = cu ? `oc:code:${cu.id}` : '';
+    const raw = cu ? await redis().get(key) : null;
+    if (!cu || !raw) throw new AppError('OTP_INVALID', { title: 'Código inválido ou expirado. Peça um novo.' });
+    const st = JSON.parse(raw) as { h: string; tries: number };
+    if (!safeEqual(st.h, sha256(code.trim()))) {
+      if (st.tries + 1 >= 5) await redis().del(key);
+      else await redis().set(key, JSON.stringify({ ...st, tries: st.tries + 1 }), 'KEEPTTL');
+      throw new AppError('OTP_INVALID', { title: 'Código incorreto. Confira o e-mail e tente de novo.' });
+    }
+    await redis().del(key);
+    const cards = await this.prisma.saved_cards.findMany({ where: { customer_id: cu.id, provider: this.gateway.name, revoked_at: null }, orderBy: [{ last_used_at: { sort: 'desc', nulls: 'last' } }, { created_at: 'desc' }] });
+    return {
+      token: signToken({ oc: cu.id, exp: Date.now() + 15 * 60_000 }),
+      first_name: cu.name.split(' ')[0],
+      cards: cards.map(k => ({ id: k.id, brand: k.brand, last4: k.last4 })),
+    };
   }
 
   responseFor(order: { id: string; code: string; status: string; total_cents: bigint; method: string; installments: number }, payment?: { pix_expires_at: Date | null } | null) {

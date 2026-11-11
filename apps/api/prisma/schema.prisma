@@ -429,6 +429,23 @@ model customers {
   @@index([phone_hash])
 }
 
+/// Cartão guardado no gateway para a compra com 1 clique (só referência + bandeira/final; nunca o número).
+model saved_cards {
+  id            String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  customer_id   String    @db.Uuid
+  provider      String
+  token_ref_enc Bytes
+  token_ref_hash String
+  brand         String
+  last4         String
+  created_at    DateTime  @default(now()) @db.Timestamptz
+  last_used_at  DateTime? @db.Timestamptz
+  revoked_at    DateTime? @db.Timestamptz
+
+  @@unique([customer_id, token_ref_hash])
+  @@index([customer_id])
+}
+
 model customer_auth_tokens {
   id          String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
   customer_id String?   @db.Uuid

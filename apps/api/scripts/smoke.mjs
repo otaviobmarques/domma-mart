@@ -47,7 +47,7 @@ const o1b = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, body, { h
 ok(o1b.body.order_id === o1.body.order_id, 'mesma Idempotency-Key devolve o mesmo pedido (RN-30)');
 const t = new URL('http://x' + o1.body.next.url).searchParams.get('t');
 const pix = await req('GET', `/v1/orders/${o1.body.order_id}/pix?t=${t}`);
-ok(pix.body.copy_paste?.startsWith('000201') && pix.body.qr?.startsWith('data:image/png'), 'QR Code e copia-e-cola gerados');
+ok(pix.body.copy_paste?.startsWith('000201') && pix.body.qr?.startsWith('data:image/svg+xml'), 'QR Code e copia-e-cola gerados');
 const forged = await req('GET', `/v1/orders/${o1.body.order_id}/pix?t=forjado.abc`);
 ok(forged.status === 401, 'token de pedido forjado é recusado');
 const fakeHook = await fetch(API + '/webhooks/sandbox', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sandbox-signature': 't=1,v1=00' }, body: JSON.stringify({ eventId: 'x', type: 'charge.paid', chargeId: pix.body.sandbox.charge_id }) });
@@ -158,5 +158,41 @@ const su = (pw) => req('POST', '/v1/auth/signup', { name: 'Teste Senha', email: 
 const s8 = await su('Ab#45678');
 ok(s8.status === 422 && s8.body.code === 'WEAK_PASSWORD', 'senha de 8 caracteres é recusada');
 ok((await su('Ab#456789')).status === 201, 'senha de 9 caracteres é aceita');
+console.log('\n8) Compra com 1 clique (cartão guardado + código no e-mail)');
+const b9 = buyer(9);
+const first = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: b9, method: 'card', card_token: cardToken('4111111111111111'), save_card: true }, { headers: { 'idempotency-key': randomUUID() } });
+ok(first.status === 201, 'compra no cartão com "guardar cartão" marcado');
+const silent = await req('POST', '/v1/public/one-click/start', { email: `ninguem.${Date.now()}@example.com` });
+ok(silent.status === 200 && /Se este e-mail/.test(silent.body.message), 'e-mail sem cartão recebe a mesma resposta (não revela quem é cliente)');
+await req('POST', '/v1/public/one-click/start', { email: b9.email.toUpperCase() });
+const ob = (await req('GET', '/v1/dev/outbox')).body;
+const ocCode = ob.find(n => n.template === 'one_click_code')?.body.match(/(\d{6})/)?.[1];
+ok(!!ocCode, 'código de 6 números enviado por e-mail');
+const wrong = await req('POST', '/v1/public/one-click/verify', { email: b9.email, code: ocCode === '000000' ? '111111' : '000000' });
+ok(wrong.status === 422 && wrong.body.code === 'OTP_INVALID', 'código errado é recusado');
+const ver = await req('POST', '/v1/public/one-click/verify', { email: b9.email, code: ocCode });
+ok(ver.status === 200 && ver.body.cards?.length === 1 && ver.body.cards[0].last4 === '1111' && ver.body.first_name === 'Maria', 'código certo mostra o cartão guardado (só bandeira e final)');
+ok(!JSON.stringify(ver.body).includes('card_sbx_'), 'referência do cartão no gateway não sai da API');
+ok((await req('POST', '/v1/public/one-click/verify', { email: b9.email, code: ocCode })).status === 422, 'código é de uso único');
+const one = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { method: 'card', installments: 2, one_click: { token: ver.body.token, card_id: ver.body.cards[0].id } }, { headers: { 'idempotency-key': randomUUID() } });
+ok(one.status === 201 && one.body.installments === 2, 'compra com 1 clique sem digitar dados nem cartão');
+const t9 = new URL('http://x' + one.body.next.url).searchParams.get('t');
+let s9; for (let i = 0; i < 20; i++) { await sleep(300); s9 = (await req('GET', `/v1/orders/${one.body.order_id}?t=${t9}`)).body; if (s9.status === 'paid') break; }
+ok(s9.status === 'paid', 'compra com 1 clique confirmada');
+const forgedOc = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { method: 'card', one_click: { token: ver.body.token.slice(0, -2) + 'xx', card_id: ver.body.cards[0].id } }, { headers: { 'idempotency-key': randomUUID() } });
+ok(forgedOc.status >= 400 && forgedOc.body.code === 'AUTH_LINK_EXPIRED', 'sessão de 1 clique adulterada é recusada');
+const noCard = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: buyer(10), method: 'card' }, { headers: { 'idempotency-key': randomUUID() } });
+ok(noCard.status === 422, 'cartão sem token nem 1 clique é recusado');
+// área do comprador: ver e remover cartão (LGPD)
+await req('POST', '/v1/customer/auth/magic-link', { email: b9.email });
+const ob2 = (await req('GET', '/v1/dev/outbox')).body;
+const ml = ob2.find(n => n.template === 'magic_link' && n.to?.toLowerCase?.() === b9.email)?.body.match(/token=([\w-]+)/)?.[1] ?? ob2.find(n => n.template === 'magic_link')?.body.match(/token=([\w-]+)/)?.[1];
+await req('POST', '/v1/customer/auth/verify', { token: ml }, { cookie: 'c9' });
+const myCards = (await req('GET', '/v1/customer/cards', null, { cookie: 'c9' })).body;
+ok(Array.isArray(myCards) && myCards.length === 1, 'comprador vê o cartão guardado em Minhas compras');
+ok((await req('DELETE', `/v1/customer/cards/${myCards[0]?.id}`, null, { cookie: 'c9' })).status === 200, 'comprador remove o cartão');
+const after9 = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { method: 'card', one_click: { token: ver.body.token, card_id: ver.body.cards[0].id } }, { headers: { 'idempotency-key': randomUUID() } });
+ok(after9.status === 422, 'cartão removido não pode mais ser usado');
+
 console.log(`\n${pass} ok, ${fail} falhas\n`);
 process.exit(fail ? 1 : 0);
