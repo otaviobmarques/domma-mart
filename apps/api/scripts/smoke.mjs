@@ -121,5 +121,32 @@ else {
   const tooMuch = await req('POST', '/v1/finance/withdrawals', { amount_cents: 999999999 }, { cookie: 'prod', headers: { 'idempotency-key': randomUUID(), 'x-otp': totp(secret) } });
   ok(tooMuch.body.code === 'INSUFFICIENT_BALANCE', 'saque acima do disponível → INSUFFICIENT_BALANCE');
 }
+
+console.log('\n6) Ajuste manual de saldo com 2 aprovadores (RN-38)');
+const la = await req('POST', '/v1/auth/login', { email: 'admin@dommamart.com', password: 'Domma@Mart2026' }, { cookie: 'adm' });
+const lf = await req('POST', '/v1/auth/login', { email: 'financeiro@dommamart.com', password: 'Domma@Mart2026' }, { cookie: 'fin' });
+if (la.status !== 200 || lf.status !== 200) { ok(false, 'login do admin e do financeiro'); }
+else {
+  const me = (await req('GET', '/v1/auth/me', null, { cookie: 'prod' })).body;
+  const before = (await req('GET', '/v1/finance/balance', null, { cookie: 'prod' })).body;
+  const short = await req('POST', '/v1/admin/adjustments', { workspace_id: me.workspace.id, amount_cents: 1234, reason: 'curto' }, { cookie: 'adm' });
+  ok(short.status === 422, 'ajuste sem motivo suficiente é recusado');
+  const a = await req('POST', '/v1/admin/adjustments', { workspace_id: me.workspace.id, amount_cents: 1234, reason: 'Teste automatizado: crédito de cortesia por instabilidade' }, { cookie: 'adm' });
+  ok(a.status === 201 && a.body.status === 'pending', 'pedido de ajuste criado como pendente');
+  const self = await req('POST', `/v1/admin/adjustments/${a.body.id}/approve`, {}, { cookie: 'adm' });
+  ok(self.status === 403, 'quem pediu não consegue aprovar o próprio ajuste');
+  const mid = (await req('GET', '/v1/finance/balance', null, { cookie: 'prod' })).body;
+  ok(mid.available_cents - mid.negative_cents === before.available_cents - before.negative_cents, 'saldo não muda enquanto o ajuste está pendente');
+  const ap = await req('POST', `/v1/admin/adjustments/${a.body.id}/approve`, { note: 'Conferido' }, { cookie: 'fin' });
+  ok(ap.status === 200 && ap.body.status === 'approved' && ap.body.transaction_id, 'outra pessoa do Financeiro aprova');
+  const again = await req('POST', `/v1/admin/adjustments/${a.body.id}/approve`, {}, { cookie: 'fin' });
+  ok(again.status === 422, 'ajuste já aprovado não é lançado duas vezes');
+  const after = (await req('GET', '/v1/finance/balance', null, { cookie: 'prod' })).body;
+  ok((after.available_cents - after.negative_cents) - (before.available_cents - before.negative_cents) === 1234, 'saldo da produtora sobe exatamente R$ 12,34');
+  const rec = (await req('GET', '/v1/admin/reconciliation', null, { cookie: 'fin' })).body;
+  ok(rec.balanced === true, 'livro-razão continua balanceado (débitos = créditos)');
+  const aud = (await req('GET', `/v1/admin/audit?target=workspace:${me.workspace.id}`, null, { cookie: 'adm' })).body;
+  ok(aud.chain.ok && aud.rows.some(r => r.action === 'ledger_adjustment.approve') && aud.rows.some(r => r.action === 'ledger_adjustment.request'), 'pedido e aprovação na auditoria com cadeia íntegra');
+}
 console.log(`\n${pass} ok, ${fail} falhas\n`);
 process.exit(fail ? 1 : 0);

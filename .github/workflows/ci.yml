@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API (testes, migrações e ponta a ponta)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: domma, POSTGRES_PASSWORD: domma, POSTGRES_DB: domma_mart }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U domma" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Chaves só de teste (CI). Produção usa o cofre de segredos — seção 11.6.
+      DATABASE_URL: postgresql://domma:domma@localhost:5432/domma_mart
+      REDIS_URL: redis://localhost:6379
+      APP_URL: http://localhost:3000
+      API_PORT: '4000'
+      FIELD_ENCRYPTION_KEY: '0000000000000000000000000000000000000000000000000000000000000001'
+      HMAC_KEY: '0000000000000000000000000000000000000000000000000000000000000002'
+      SIGNING_KEY: '0000000000000000000000000000000000000000000000000000000000000003'
+      GATEWAY_PROVIDER: sandbox
+      GATEWAY_WEBHOOK_SECRET: ci_sandbox_secret
+      STORAGE_DIR: ./storage
+      SKIP_PWNED_CHECK: '1'
+      DISABLE_CRON: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Testes unitários e de propriedade (taxas, divisão, ledger, TOTP)
+        run: npm test -w apps/api
+      - name: Build
+        run: npm run build -w apps/api
+      - name: Migrações
+        run: npx prisma migrate deploy
+        working-directory: apps/api
+      - name: OpenAPI atualizado
+        run: |
+          npm run openapi -w apps/api
+          git diff --exit-code docs/openapi.json || (echo "::error::docs/openapi.json desatualizado — rode 'npm run openapi -w apps/api' e faça commit" && exit 1)
+      - name: Seed
+        working-directory: apps/api
+        shell: bash
+        run: |
+          set -o pipefail
+          node dist/seed.js | tee seed.txt
+      - name: Ponta a ponta (smoke)
+        working-directory: apps/api
+        shell: bash
+        run: |
+          set -o pipefail
+          test -n "$(grep 'produtora@demo.com' seed.txt)" || { echo '::error::seed não gerou a produtora'; exit 1; }
+          node dist/main.js > api.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:4000/health && break; sleep 1; done
+          export PROD_TOTP=$(grep 'produtora@demo.com' seed.txt | sed -E 's/.*TOTP: ([A-Z2-7]+).*/\1/')
+          node scripts/smoke.mjs
+      - name: Log da API em caso de falha
+        if: failure()
+        run: tail -200 apps/api/api.log || true
+      - name: Vulnerabilidades críticas
+        run: npm audit --omit=dev --audit-level=critical
+
+  web:
+    name: Site (tipos e build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx tsc --noEmit
+        working-directory: apps/web
+      - run: npm run build -w apps/web
+        env: { NEXT_TELEMETRY_DISABLED: '1' }

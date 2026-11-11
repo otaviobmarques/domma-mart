@@ -31,6 +31,12 @@ const OrderSchema = z.object({
   device_fingerprint: z.string().max(100).optional(),
 });
 
+/** Domínio que o comprador está usando (o site repassa em x-dm-host; o Vercel em x-forwarded-host). */
+function requestHost(req: R): string | undefined {
+  const h = (req.headers['x-dm-host'] as string) || (req.headers['x-forwarded-host'] as string) || '';
+  return h.split(',')[0].trim().toLowerCase() || undefined;
+}
+
 function orderFromToken(id: string, t: string | undefined) {
   const p = verifyToken<{ o: string }>(t);
   if (!p || p.o !== id) throw new AppError('AUTH_LINK_EXPIRED');
@@ -42,8 +48,8 @@ export class CheckoutController {
   constructor(private svc: CheckoutService, private prisma: PrismaService, private events: EventEmitter2, @Inject(GATEWAY) private gateway: GatewayAdapter) {}
 
   @Get('v1/public/offers/:slug')
-  async offer(@Param('slug') slug: string, @Query() q: Record<string, string>) {
-    return toJSON(await this.svc.publicOffer(slug, Object.fromEntries(Object.entries(q).filter(([k]) => /^(utm_|src|ref|fbclid|gclid)/.test(k)))));
+  async offer(@Param('slug') slug: string, @Query() q: Record<string, string>, @Req() req: R) {
+    return toJSON(await this.svc.publicOffer(slug, Object.fromEntries(Object.entries(q).filter(([k]) => /^(utm_|src|ref|fbclid|gclid)/.test(k))), requestHost(req)));
   }
 
   @Post('v1/public/coupons/validate') @HttpCode(200)
@@ -64,7 +70,7 @@ export class CheckoutController {
     if (!idem || idem.length < 16 || idem.length > 100) throw new AppError('IDEMPOTENCY_KEY_REQUIRED');
     if (!(await verifyTurnstile(captcha, clientIp(req)))) throw new AppError('RATE_LIMITED');
     const body = parse(OrderSchema, b);
-    const r = await this.svc.createOrder(offerId, body, { ip: clientIp(req), ua: String(req.headers['user-agent'] || ''), idempotencyKey: `co:${idem}`, affiliateCookie: req.cookies?.[`dm_aff_${offerId}`] || req.cookies?.dm_aff });
+    const r = await this.svc.createOrder(offerId, body, { ip: clientIp(req), ua: String(req.headers['user-agent'] || ''), idempotencyKey: `co:${idem}`, affiliateCookie: req.cookies?.[`dm_aff_${offerId}`] || req.cookies?.dm_aff, host: requestHost(req) });
     return toJSON(r);
   }
 

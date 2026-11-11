@@ -55,11 +55,29 @@ PROD_TOTP=<segredo da produtora> node apps/api/scripts/smoke.mjs   # ponta a pon
 | Back-office: KYC, moderação, contas, disputas, risco, conciliação, auditoria com hash encadeado (5.10, 19.11) | `modules/admin`, `web/app/admin` |
 | Segurança: Argon2id, senhas vazadas (k-anonymity), bloqueio progressivo, RBAC + RLS, cripto de campo AES-GCM + índice cego HMAC, CSRF, CSP | `http/auth.guard.ts`, `common/crypto.ts`, `auth.controller.ts` |
 
+## Login com Google
+
+Fica desligado (botão escondido) até existirem as duas variáveis na **API**:
+
+1. No [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → *Criar credenciais* → *ID do cliente OAuth* → tipo **Aplicativo da Web**.
+2. Em *URIs de redirecionamento autorizados*, adicione `https://<seu-site>/v1/auth/google/callback` (homologação: `https://domma-mart.vercel.app/v1/auth/google/callback`).
+3. Coloque `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET` nas variáveis do serviço `api` no Railway.
+
+Teste automatizado com servidor OAuth falso: `apps/api/scripts/google-oauth.test.mjs`.
+
+## Domínio próprio do produtor
+
+O produtor cadastra `pay.seusite.com.br` em **Configurações › Domínio próprio**, cria o CNAME indicado e clica em *Verificar*; o SSL é emitido pelo Vercel. Nesse domínio só as ofertas daquele produtor são vendidas e o painel/back-office não existem.
+
+Para ligar, coloque na **API** (Railway): `VERCEL_TOKEN` (token com acesso ao projeto), `VERCEL_PROJECT_ID` e `VERCEL_TEAM_ID`. No **site** (Vercel), opcionalmente `MAIN_HOSTS` com os domínios principais (ex.: `dommamart.com.br`); `*.vercel.app` já é tratado como principal.
+
+Teste com API falsa do Vercel: `apps/api/scripts/domains.test.mjs`.
+
 ## Pendências antes de produção
 
 - **Gateway real** (decisão D1): hoje roda com o adaptador *sandbox*. Ver `apps/api/src/modules/gateway/README.md`.
 - **Vídeo**: o armazenamento é local com URLs assinadas; trocar por Bunny/Cloudflare Stream e R2/S3 (bucket KYC separado).
 - **Credenciais**: Resend (`RESEND_API_KEY`), Domma Chat (`DOMMA_CHAT_URL`/`TOKEN`), Cloudflare Turnstile (`TURNSTILE_SECRET`/`TURNSTILE_SITE_KEY`), KMS para as chaves de campo, cofre de segredos.
-- **Não implementado no MVP**: login com Google, domínio próprio do produtor com SSL, ajuste manual de ledger com aprovação de 2 pessoas (RN-38), consulta automática à Receita no KYC, antivírus de upload, emissão de nota fiscal, recursos da Fase 2/3.
+- **Não implementado no MVP**: ajuste manual de ledger com aprovação de 2 pessoas (RN-38), consulta automática à Receita no KYC, antivírus de upload, emissão de nota fiscal, recursos da Fase 2/3.
 - **Jurídico/contábil** (seção 12): termos, privacidade, enquadramento regulatório e impostos.
 - **Revisão humana sênior + pentest** dos módulos de pagamento, ledger e segurança (seções 15 e 16).

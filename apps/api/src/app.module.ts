@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { DiscoveryModule } from '@nestjs/core';
 import { PrismaService } from './infra/prisma.service';
 import { AuditService } from './infra/audit.service';
 import { StorageService } from './infra/storage.service';
@@ -28,6 +29,9 @@ import { AffiliatesController } from './modules/affiliates/affiliates.controller
 import { SettingsController } from './modules/settings/settings.controller';
 import { AdminController, DevController } from './modules/admin/admin.controller';
 import { HealthController } from './health.controller';
+import { GoogleAuthController } from './modules/auth/google.controller';
+import { AdjustmentsController } from './modules/adjustments/adjustments.controller';
+import { DomainsController } from './modules/domains/domains.controller';
 
 /** Adaptador de gateway escolhido por configuração (P3 — multigateway). */
 function gatewayFactory() {
@@ -37,11 +41,11 @@ function gatewayFactory() {
 }
 
 @Module({
-  imports: [EventEmitterModule.forRoot()],
+  imports: [EventEmitterModule.forRoot(), DiscoveryModule],
   controllers: [
     HealthController, CheckoutController, WebhooksController, SandboxController, AuthController, CustomerController, OptOutController,
     ProductsController, MembersController, FilesController, DashboardController, KycController, AffiliatesController, SettingsController,
-    AdminController, DevController,
+    AdminController, DevController, DomainsController, AdjustmentsController, GoogleAuthController,
   ],
   providers: [
     PrismaService, AuditService, StorageService, QueueService, NotifyService, LedgerService, OrdersService, CheckoutService, JobsService, FinanceService,

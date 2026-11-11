@@ -1,5 +1,6 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { GoogleButton, GOOGLE_ERRORS } from '@/components/google-button';
 import { post, ApiError } from '@/lib/api';
 import { Button, Field, Card, Banner, Logo } from '@/components/ui';
 
@@ -8,6 +9,8 @@ export default function Entrar() {
   const [password, setPassword] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [back, setBack] = useState('/inicio');
+  useEffect(() => { const q = new URLSearchParams(location.search); const e = q.get('erro'); if (e) setErr(GOOGLE_ERRORS[e] ?? 'Não foi possível entrar.'); const v = q.get('volta'); if (v && v.startsWith('/') && !v.startsWith('//')) setBack(v); }, []);
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setErr(null); setBusy(true);
     try {
@@ -27,6 +30,7 @@ export default function Entrar() {
           {err && <Banner tone="bad">{err}</Banner>}
           <Button type="submit" size="lg" full loading={busy}>Entrar</Button>
         </form>
+        <GoogleButton href={`/v1/auth/google/start?volta=${encodeURIComponent(back)}`} />
         <div className="mt-4 flex justify-between text-[14px]"><a href="/esqueci-senha" className="font-semibold text-action">Esqueci a senha</a><a href="/criar-conta" className="font-semibold text-action">Criar conta</a></div>
       </Card>
       <p className="mt-5 text-center text-[14px] text-ink-mute">Comprou um curso? <a href="/minhas-compras/entrar" className="font-semibold text-action">Acesse suas compras</a></p>

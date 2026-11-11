@@ -7,7 +7,8 @@
     "start": "node dist/main.js",
     "test": "vitest run",
     "db:migrate": "prisma migrate deploy",
-    "db:seed": "node dist/seed.js"
+    "db:seed": "node dist/seed.js",
+    "openapi": "DISABLE_CRON=1 node dist/main.js --openapi"
   },
   "dependencies": {
     "@nestjs/common": "^12.4.2",

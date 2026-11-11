@@ -32,6 +32,7 @@ model users {
   name              String
   phone_enc         Bytes?
   password_hash     String?
+  google_sub        String?      @unique
   email_verified_at DateTime?    @db.Timestamptz
   totp_secret_enc   Bytes?
   totp_enabled_at   DateTime?    @db.Timestamptz
@@ -845,4 +846,38 @@ model fee_tiers_cache {
   revenue_30d     BigInt
   fee_bps         Int
   computed_at     DateTime @db.Timestamptz
+}
+
+// Domínio próprio do produtor para o checkout (5.3), com SSL automático no Vercel
+model custom_domains {
+  id           String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  hostname     String    @unique
+  status       String    @default("pending") // pending | active | error
+  dns          Json? // registros que o produtor precisa criar
+  last_error   String?
+  verified_at  DateTime? @db.Timestamptz
+  created_at   DateTime  @default(now()) @db.Timestamptz
+  updated_at   DateTime  @updatedAt @db.Timestamptz
+
+  @@index([workspace_id])
+}
+
+// Ajuste manual de saldo com aprovação de 2 pessoas do Financeiro Domma (RN-38)
+model ledger_adjustments {
+  id             String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  workspace_id   String    @db.Uuid
+  amount_cents   BigInt // positivo = crédito ao produtor; negativo = débito
+  reason         String
+  requested_by   String    @db.Uuid
+  decided_by     String?   @db.Uuid
+  decision_note  String?
+  status         String    @default("pending") // pending | approved | rejected | cancelled
+  transaction_id String?   @db.Uuid
+  decided_at     DateTime? @db.Timestamptz
+  created_at     DateTime  @default(now()) @db.Timestamptz
+  updated_at     DateTime  @updatedAt @db.Timestamptz
+
+  @@index([status, created_at])
+  @@index([workspace_id])
 }
