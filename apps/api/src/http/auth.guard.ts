@@ -2,7 +2,10 @@ import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../infra/prisma.service';
 import { AUTH_KEY, AuthSpec, Req, ALL_PERMISSIONS, PLATFORM_PERMS } from './context';
-import { sha256 } from '../common/crypto';
+import { sha256, safeEqual, hashIp } from '../common/crypto';
+import { parseApiKey } from '../domain/api-keys';
+import * as rl from '../infra/rate-limit';
+import { trustedClientIp } from './edge';
 import { AppError } from '../common/errors';
 
 const INACTIVITY_MS = 2 * 60 * 60 * 1000; // RN-82: 2 h de inatividade em telas financeiras
@@ -15,10 +18,33 @@ const INACTIVITY_MS = 2 * 60 * 60 * 1000; // RN-82: 2 h de inatividade em telas 
 export class AuthGuard implements CanActivate {
   constructor(private reflector: Reflector, private prisma: PrismaService) {}
 
+  /**
+   * API pública: chave no cabeçalho Authorization (sem cookie, então sem risco de CSRF).
+   * Chave revogada, de conta bloqueada ou sem a permissão da rota é recusada; limite de 120 chamadas/min por chave.
+   */
+  private async apiKey(req: Req, scope?: string): Promise<boolean> {
+    const auth = String(req.headers.authorization || '');
+    const parsed = parseApiKey(auth.startsWith('Bearer ') ? auth.slice(7) : undefined);
+    if (!parsed) throw new AppError('UNAUTHENTICATED', { title: 'Envie a chave da API no cabeçalho Authorization: Bearer dm_live_...' });
+    const k = await this.prisma.api_keys.findUnique({ where: { prefix: parsed.prefix } });
+    if (!k || k.revoked_at || !safeEqual(k.key_hash, sha256(parsed.key))) throw new AppError('UNAUTHENTICATED', { title: 'Chave da API inválida ou revogada.' });
+    const ws = await this.prisma.workspaces.findUnique({ where: { id: k.workspace_id }, select: { blocked_at: true } });
+    if (!ws || ws.blocked_at) throw new AppError('ACCOUNT_BLOCKED');
+    if (scope && !k.scopes.includes(scope)) throw new AppError('PERMISSION_DENIED', { title: `Esta chave não tem a permissão ${scope}. Crie uma chave com ela em Configurações › API.` });
+    await rl.limit(`apikey:${k.id}`, 120, 60);
+    await rl.hit(`apiuse:${k.id}:${new Date().toISOString().slice(0, 10)}`, 2 * 86400); // chamadas do dia, mostradas no painel
+    if (!k.last_used_at || Date.now() - k.last_used_at.getTime() > 60_000) {
+      await this.prisma.api_keys.update({ where: { id: k.id }, data: { last_used_at: new Date(), last_used_ip_hash: hashIp(trustedClientIp(req as any)) } });
+    }
+    req.apiKey = { keyId: k.id, workspaceId: k.workspace_id, scopes: k.scopes };
+    return true;
+  }
+
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const spec = this.reflector.getAllAndOverride<AuthSpec>(AUTH_KEY, [ctx.getHandler(), ctx.getClass()]) ?? { kind: 'public' };
     const req = ctx.switchToHttp().getRequest<Req>();
     if (spec.kind === 'public') return true;
+    if (spec.kind === 'apikey') return this.apiKey(req, spec.scope);
 
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers['x-requested-with'] !== 'domma') {
       throw new AppError('PERMISSION_DENIED', { title: 'Requisição inválida (CSRF).' });

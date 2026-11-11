@@ -17,6 +17,7 @@ const direct = await call(API, '/v1/public/offers/confeitaria');
 ok(direct.status === 403 && /Acesso direto/.test(direct.body.title), 'sem o carimbo do site, a API recusa');
 ok((await call(API, '/v1/public/offers/confeitaria', { headers: { 'x-domma-edge': 'chute' } })).status === 403, 'carimbo errado também é recusado');
 ok((await call(API, '/v1/public/offers/confeitaria', { headers: { 'x-forwarded-for': '8.8.8.8', 'cf-connecting-ip': '8.8.8.8' } })).status === 403, 'cabeçalho de IP forjado não abre a porta');
+ok((await call(API, '/api/v1/me', { headers: { authorization: 'Bearer dm_live_abcdefghij_abcdefghijklmnopqrstuvwxyz234567' } })).status === 403, 'API pública também só pelo site (direto no Railway é recusado)');
 ok((await call(API, '/health')).status === 200, '/health continua aberto (verificação do Railway)');
 const hook = await call(API, '/webhooks/sandbox', { method: 'POST', body: { x: 1 } });
 ok(!/Acesso direto/.test(JSON.stringify(hook.body)), 'webhooks continuam chegando direto (protegidos pela assinatura do gateway)');
@@ -38,6 +39,7 @@ if (WEB) {
   const c = await call(WEB, '/v1/public/coupons/validate', { method: 'POST', headers: { 'x-domma-client-ip': '203.0.113.7' }, body: { offer_id: offer.offer_id, code: 'BEMVINDO' } });
   ok(c.status === 200, 'visitante não consegue se passar por outro IP pelo cabeçalho do carimbo');
   ok((await fetch(WEB + '/pay/confeitaria')).status === 200, 'checkout abre');
+  ok((await call(WEB, '/api/v1/openapi.json')).status === 200, 'API pública responde pelo site');
 }
 console.log(`\n${pass} ok, ${fail} falhas`);
 process.exit(fail ? 1 : 0);

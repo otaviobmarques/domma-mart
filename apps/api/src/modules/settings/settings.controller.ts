@@ -5,13 +5,16 @@ import { NotifyService } from '../../infra/notify.service';
 import { Producer, Ctx, ProducerCtx, ALL_PERMISSIONS } from '../../http/context';
 import { parse, z } from '../../http/zod';
 import { AppError } from '../../common/errors';
-import { encrypt, decrypt, randomToken } from '../../common/crypto';
+import { encrypt, decrypt, randomToken, sha256 } from '../../common/crypto';
+import { SCOPES, SCOPE_KEYS, newApiKey } from '../../domain/api-keys';
+import * as rl from '../../infra/rate-limit';
 import { normalizeBRMobile } from '../../domain/validators';
 import { toJSON } from '../../http/json';
 import { isPublicHttpUrl } from '../integrations/ssrf';
 import { JobsService } from '../jobs/jobs.service';
 
-const EVENTS = ['order.created', 'order.paid', 'order.refunded', 'order.chargeback', 'pix.generated', 'boleto.generated', 'cart.abandoned', 'subscription.renewed', 'subscription.canceled', 'affiliate.commission'];
+import { WEBHOOK_EVENTS } from '../../domain/webhook-events';
+const EVENTS = [...WEBHOOK_EVENTS] as string[];
 
 /** Configurações (19.12 g): dados da conta, equipe, integrações, recuperação. */
 @Controller('v1/settings')
@@ -87,6 +90,41 @@ export class SettingsController {
   @Delete('webhooks/:id') @Producer('settings.manage')
   async delWebhook(@Ctx() c: ProducerCtx, @Param('id') id: string) {
     await this.prisma.webhook_endpoints.updateMany({ where: { id, workspace_id: c.workspaceId }, data: { active: false, disabled_at: new Date() } });
+    return { ok: true };
+  }
+
+  // ───── API pública: chaves de acesso ─────
+  @Get('api-keys') @Producer('settings.manage')
+  async apiKeys(@Ctx() c: ProducerCtx) {
+    const keys = await this.prisma.api_keys.findMany({ where: { workspace_id: c.workspaceId }, orderBy: { created_at: 'desc' } });
+    const day = new Date().toISOString().slice(0, 10);
+    const users = await this.prisma.users.findMany({ where: { id: { in: keys.map(k => k.created_by) } }, select: { id: true, name: true } });
+    return toJSON({ scopes: SCOPES, keys: await Promise.all(keys.map(async k => ({
+      id: k.id, name: k.name, hint: `dm_live_${k.prefix}_…`, scopes: k.scopes, created_at: k.created_at, created_by: users.find(u => u.id === k.created_by)?.name,
+      last_used_at: k.last_used_at, revoked_at: k.revoked_at, calls_today: k.revoked_at ? 0 : await rl.count(`apiuse:${k.id}:${day}`),
+    }))) });
+  }
+
+  /** Nova chave: aparece uma única vez. Exige verificação em duas etapas ligada (a chave dá acesso aos dados da conta). */
+  @Post('api-keys') @Producer('settings.manage')
+  async createApiKey(@Ctx() c: ProducerCtx, @Body() b: any) {
+    const d = parse(z.object({ name: z.string().trim().min(2).max(60), scopes: z.array(z.enum(SCOPE_KEYS)).min(1) }), b);
+    if (!c.totpEnabled) throw new AppError('TWO_FACTOR_REQUIRED', { title: 'Ative a verificação em duas etapas (Configurações › Segurança) para criar chaves de API.' });
+    if ((await this.prisma.api_keys.count({ where: { workspace_id: c.workspaceId, revoked_at: null } })) >= 10) throw new AppError('VALIDATION_ERROR', { title: 'Limite de 10 chaves ativas. Revogue uma que não usa mais.' });
+    const { prefix, key } = newApiKey();
+    const k = await this.prisma.api_keys.create({ data: { workspace_id: c.workspaceId, name: d.name, prefix, key_hash: sha256(key), scopes: [...new Set(d.scopes)], created_by: c.userId } });
+    await this.audit.log({ actorId: c.userId, action: 'api_key.create', target: `workspace:${c.workspaceId}`, after: { id: k.id, name: k.name, scopes: k.scopes } });
+    return { id: k.id, name: k.name, scopes: k.scopes, key, message: 'Copie a chave agora: por segurança, ela não aparece de novo.' };
+  }
+
+  @Delete('api-keys/:id') @Producer('settings.manage')
+  async revokeApiKey(@Ctx() c: ProducerCtx, @Param('id') id: string) {
+    const k = await this.prisma.api_keys.findFirst({ where: { id, workspace_id: c.workspaceId, revoked_at: null } });
+    if (!k) throw new AppError('NOT_FOUND');
+    await this.prisma.api_keys.update({ where: { id }, data: { revoked_at: new Date(), revoked_by: c.userId } });
+    // webhooks inscritos por esta chave (Zapier/n8n) param junto
+    await this.prisma.webhook_endpoints.updateMany({ where: { api_key_id: id, active: true }, data: { active: false, disabled_at: new Date() } });
+    await this.audit.log({ actorId: c.userId, action: 'api_key.revoke', target: `workspace:${c.workspaceId}`, before: { id, name: k.name } });
     return { ok: true };
   }
 

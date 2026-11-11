@@ -4,9 +4,10 @@ import { get, post, api, ApiError } from '@/lib/api';
 import { ago, dateTime, maskPhone } from '@/lib/format';
 import { useMe } from '@/components/session';
 import { PrivacyCard } from '@/components/privacy-card';
+import { ApiKeys } from '@/components/api-keys';
 import { Button, Card, Field, Textarea, Toggle, Banner, Pill, Modal, CopyButton, cx } from '@/components/ui';
 
-const TABS = [['seguranca', 'Perfil e segurança'], ['equipe', 'Equipe'], ['empresa', 'Dados da empresa'], ['notificacoes', 'Notificações'], ['recuperacao', 'Recuperação de vendas'], ['integracoes', 'Integrações'], ['dominio', 'Domínio próprio'], ['privacidade', 'Privacidade e dados']] as const;
+const TABS = [['seguranca', 'Perfil e segurança'], ['equipe', 'Equipe'], ['empresa', 'Dados da empresa'], ['notificacoes', 'Notificações'], ['recuperacao', 'Recuperação de vendas'], ['integracoes', 'Integrações'], ['api', 'API'], ['dominio', 'Domínio próprio'], ['privacidade', 'Privacidade e dados']] as const;
 const PERM: Record<string, string> = { 'dashboard.view': 'Ver início', 'products.edit': 'Editar produtos', 'orders.view': 'Ver vendas', 'orders.refund': 'Reembolsar', 'finance.view': 'Ver financeiro', 'finance.withdraw': 'Sacar', 'affiliates.manage': 'Gerir afiliados', 'settings.manage': 'Configurações', 'team.manage': 'Gerir equipe' };
 
 export default function Config() {
@@ -25,6 +26,7 @@ export default function Config() {
         {tab === 'notificacoes' && <Notificacoes />}
         {tab === 'recuperacao' && <Recuperacao setMsg={setMsg} />}
         {tab === 'integracoes' && <Integracoes setMsg={setMsg} />}
+        {tab === 'api' && <ApiKeys setMsg={setMsg} />}
         {tab === 'dominio' && <Dominio setMsg={setMsg} />}
         {tab === 'privacidade' && <div className="max-w-2xl"><PrivacyCard base="/v1/privacy" audience="seller" /></div>}
       </div>
@@ -142,7 +144,7 @@ function Integracoes({ setMsg }: any) {
         {d.endpoints.length === 0 ? <p className="mt-2 text-ink-mute">Nenhum ainda.</p> : <ul className="mt-2 divide-y divide-line">{d.endpoints.map((e: any) => <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 py-3"><span className="min-w-0"><span className="num block truncate text-[14px]">{e.url}</span><span className="text-[13px] text-ink-mute">{e.events.join(', ')}</span></span><span className="flex items-center gap-2">{e.active ? <Pill tone="ok">Ativo</Pill> : <Pill tone="bad">Desativado</Pill>}{e.active && <><Button size="sm" variant="secondary" onClick={async () => { const r = await post(`/v1/settings/webhooks/${e.id}/test`); setMsg({ tone: r.delivered_at ? 'ok' : 'bad', text: r.delivered_at ? `Teste entregue (HTTP ${r.last_status}).` : `Falhou: ${r.last_error}` }); load(); }}>Testar</Button><Button size="sm" variant="ghost" className="text-bad" onClick={async () => { await api('DELETE', `/v1/settings/webhooks/${e.id}`); load(); }}>Remover</Button></>}</span></li>)}</ul>}
         {d.deliveries.length > 0 && <><h3 className="mt-4 text-[14px] font-bold">Últimas entregas</h3><ul className="mt-1 text-[13.5px]">{d.deliveries.slice(0, 10).map((x: any) => <li key={x.id} className="flex justify-between gap-3 py-1"><span className="num">{x.event_type}</span><span className={x.delivered_at ? 'text-ok' : 'text-bad'}>{x.delivered_at ? `✓ ${x.last_status}` : `${x.attempts} tentativas · ${x.last_error ?? 'aguardando'}`}</span></li>)}</ul></>}
       </Card>
-      <Card><h2 className="font-extrabold">Outras integrações</h2><ul className="mt-2 space-y-2 text-[14.5px]"><li><b>Domma CRM e Domma Chat</b> — lead e venda com fonte de dados; recuperação por WhatsApp. <span className="text-ink-mute">Configurado pela equipe Domma.</span></li><li><b>Pixel Meta, GA4, Google Ads, TikTok</b> — em cada produto, aba Pixels.</li><li><b>UTMify</b> — use um webhook com os eventos <span className="num">order.paid</span> e <span className="num">order.refunded</span>.</li><li><b>API pública</b> — chegando na Fase 2.</li></ul></Card>
+      <Card><h2 className="font-extrabold">Outras integrações</h2><ul className="mt-2 space-y-2 text-[14.5px]"><li><b>Domma CRM e Domma Chat</b> — lead e venda com fonte de dados; recuperação por WhatsApp. <span className="text-ink-mute">Configurado pela equipe Domma.</span></li><li><b>Pixel Meta, GA4, Google Ads, TikTok</b> — em cada produto, aba Pixels.</li><li><b>UTMify</b> — use um webhook com os eventos <span className="num">order.paid</span> e <span className="num">order.refunded</span>.</li><li><b>API pública, Zapier e n8n</b> — crie uma chave na aba <a href="/configuracoes?aba=api" className="font-semibold text-action">API</a>. <a href="/desenvolvedores" target="_blank" className="font-semibold text-action">Ver documentação</a>.</li></ul></Card>
       <Modal open={!!secret} onClose={() => setSecret(null)} title="Guarde este segredo"><p className="text-ink-soft">Use para validar a assinatura. Ele não será mostrado de novo.</p><p id="copy-src" className="num mt-3 break-all rounded-ctl bg-canvas p-3 text-[13px]">{secret}</p><div className="mt-3"><CopyButton text={secret ?? ''} full variant="primary" /></div></Modal>
     </div>
   );

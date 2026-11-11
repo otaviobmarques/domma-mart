@@ -518,5 +518,57 @@ console.log('\n14) Marketplace de afiliados');
   await req('POST', `/v1/admin/products/${conf.id}/marketplace`, { listed: true, reason: 'Teste: produto devolvido à vitrine' }, A);
 }
 
+console.log('\n15) API pública (chaves, permissões, paginação, cupons, webhooks)');
+{
+  const P = { cookie: 'prod' };
+  const call = async (method, path, key, body) => {
+    const r = await fetch(API + '/api/v1' + path, { method, headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = t; }
+    return { status: r.status, body: j };
+  };
+  const spec = await call('GET', '/openapi.json');
+  ok(spec.status === 200 && spec.body.paths['/sales'] && spec.body.components['x-scopes']['sales:read'], 'especificação OpenAPI pública');
+  const k1 = await req('POST', '/v1/settings/api-keys', { name: 'Leitura de vendas', scopes: ['sales:read', 'products:read'] }, P);
+  ok(k1.status === 201 && /^dm_live_[a-z0-9]{10}_[a-z0-9]{32}$/.test(k1.body.key), 'produtora cria chave (mostrada uma vez)');
+  const keys = (await req('GET', '/v1/settings/api-keys', null, P)).body.keys;
+  ok(keys.some(k => k.id === k1.body.id && k.hint.endsWith('…') && !JSON.stringify(keys).includes(k1.body.key)), 'lista de chaves não mostra a chave inteira');
+  ok((await call('GET', '/me')).status === 401, 'sem chave → 401');
+  ok((await call('GET', '/me', k1.body.key.slice(0, -1) + (k1.body.key.endsWith('a') ? 'b' : 'a'))).status === 401, 'chave alterada → 401');
+  const me = await call('GET', '/me', k1.body.key);
+  ok(me.status === 200 && me.body.account.name === 'Ana Confeiteira' && me.body.key.scopes.includes('sales:read'), 'chave válida identifica a conta e as permissões');
+  const s1 = await call('GET', '/sales?status=paid&limit=2', k1.body.key);
+  ok(s1.status === 200 && s1.body.data.length === 2 && s1.body.has_more && s1.body.next_cursor === s1.body.data[1].id, 'vendas paginadas por cursor');
+  const s2 = await call('GET', `/sales?status=paid&limit=2&cursor=${s1.body.next_cursor}`, k1.body.key);
+  ok(s2.body.data.length >= 1 && !s2.body.data.some(x => s1.body.data.some(y => y.id === x.id)), 'próxima página sem repetir vendas');
+  const v = s1.body.data[0];
+  ok(v.status === 'paid' && v.customer.email.includes('@') && !v.customer.email.includes('*') && v.customer.phone === undefined && typeof v.net_cents === 'number', 'venda com e-mail do comprador, sem telefone/CPF sem customers:read');
+  const byCode = await call('GET', `/sales/${v.code}`, k1.body.key);
+  ok(byCode.status === 200 && byCode.body.id === v.id && byCode.body.events.length > 0, 'venda pelo código DM-... com histórico');
+  ok((await call('GET', '/sales?status=pago', k1.body.key)).status === 422, 'filtro inválido → 422 com explicação');
+  ok((await call('GET', '/customers', k1.body.key)).status === 403, 'sem customers:read → 403');
+  ok((await call('POST', '/coupons', k1.body.key, { code: 'APITESTE', kind: 'percent', value: 1000 })).status === 403, 'sem coupons:write → 403');
+  ok((await call('GET', '/products', k1.body.key)).body.data.some(p => p.offers.some(o => o.checkout_url)), 'produtos com ofertas e link de checkout');
+
+  const k2 = await req('POST', '/v1/settings/api-keys', { name: 'Zapier', scopes: ['sales:read', 'customers:read', 'products:read', 'affiliates:read', 'coupons:write', 'webhooks:write'] }, P);
+  const cs = await call('GET', '/customers?limit=5', k2.body.key);
+  ok(cs.status === 200 && cs.body.data[0].phone && cs.body.data[0].document, 'com customers:read: telefone e CPF');
+  const cp = await call('POST', '/coupons', k2.body.key, { code: `API${Date.now() % 100000}`, kind: 'percent', value: 1500, max_uses: 1 });
+  ok(cp.status === 201 && cp.body.value === 1500, 'cupom criado pela API');
+  const vc = await req('POST', '/v1/public/coupons/validate', { offer_id: offer.offer_id, code: cp.body.code });
+  ok(vc.status === 200, 'cupom da API vale no checkout');
+  ok((await call('PATCH', `/coupons/${cp.body.id}`, k2.body.key, { active: false })).body.active === false && (await req('POST', '/v1/public/coupons/validate', { offer_id: offer.offer_id, code: cp.body.code })).status === 422, 'cupom desativado pela API deixa de valer');
+  ok((await call('GET', '/affiliates', k2.body.key)).body.data.some(a => a.code === 'bruno' && a.affiliate.email.includes('*')), 'afiliados com e-mail mascarado');
+  ok((await call('POST', '/webhooks', k2.body.key, { url: 'http://127.0.0.1:9/x', events: ['order.paid'] })).status === 422, 'webhook para rede interna é recusado');
+  const wh = await call('POST', '/webhooks', k2.body.key, { url: 'https://example.com/domma-hook', events: ['order.paid', 'order.refunded'] });
+  ok(wh.status === 201 && wh.body.secret.startsWith('whsec_'), 'Zapier/n8n inscreve webhook e recebe o segredo');
+  ok((await call('GET', '/events/sample?type=order.paid', k2.body.key)).body[0].type === 'order.paid', 'exemplo de evento para mapear campos');
+  // revogar a chave para os webhooks que ela criou
+  ok((await req('DELETE', `/v1/settings/api-keys/${k2.body.id}`, null, P)).status === 200, 'produtora revoga a chave');
+  ok((await call('GET', '/me', k2.body.key)).status === 401, 'chave revogada para na hora');
+  const hooks = (await req('GET', '/v1/settings/webhooks', null, P)).body.endpoints;
+  ok(hooks.find(e => e.id === wh.body.id)?.active === false, 'webhook criado pela chave revogada é desligado');
+  await req('DELETE', `/v1/settings/api-keys/${k1.body.id}`, null, P);
+}
+
 console.log(`\n${pass} ok, ${fail} falhas\n`);
 process.exit(fail ? 1 : 0);

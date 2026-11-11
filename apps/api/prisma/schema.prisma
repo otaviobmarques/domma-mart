@@ -782,6 +782,8 @@ model webhook_events_in {
 model webhook_endpoints {
   id           String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
   workspace_id String    @db.Uuid
+  /// criado pela API pública (Zapier, n8n...) com esta chave
+  api_key_id   String?   @db.Uuid
   url          String
   secret_enc   Bytes
   events       String[]
@@ -1018,4 +1020,23 @@ model affiliate_materials {
   created_at DateTime @default(now()) @db.Timestamptz
 
   @@index([product_id])
+}
+
+/// API pública (Fase 2): chave de acesso por conta. Só o hash é guardado; a chave aparece uma vez.
+model api_keys {
+  id                String    @id @default(dbgenerated("uuid_generate_v7()")) @db.Uuid
+  workspace_id      String    @db.Uuid
+  name              String
+  /// parte visível da chave (dm_live_<prefix>_...), usada para achar a chave
+  prefix            String    @unique
+  key_hash          String
+  scopes            String[]
+  created_by        String    @db.Uuid
+  created_at        DateTime  @default(now()) @db.Timestamptz
+  last_used_at      DateTime? @db.Timestamptz
+  last_used_ip_hash String?
+  revoked_at        DateTime? @db.Timestamptz
+  revoked_by        String?   @db.Uuid
+
+  @@index([workspace_id])
 }

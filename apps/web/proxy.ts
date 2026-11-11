@@ -9,13 +9,13 @@ const MAIN = (process.env.MAIN_HOSTS || '').split(',').map(h => h.trim().toLower
 const BUYER_PREFIXES = ['/pay/', '/pix/', '/obrigado/', '/boleto/', '/minhas-compras', '/curso', '/cursos', '/certificado/', '/descadastro', '/termos', '/privacidade', '/v1/', '/r/', '/webhooks/'];
 const cache = new Map<string, { ok: boolean; at: number }>();
 // rotas do painel, back-office e conta: nunca viram "código de oferta" num domínio de produtor
-const PANEL_ROUTES = new Set(['inicio', 'produtos', 'vendas', 'financeiro', 'afiliados', 'afiliado', 'afiliar', 'configuracoes', 'identidade', 'socios', 'admin', 'entrar', 'criar', 'criarconta', 'dev', 'esqueci', 'nova', 'confirmar']);
+const PANEL_ROUTES = new Set(['inicio', 'desenvolvedores', 'produtos', 'vendas', 'financeiro', 'afiliados', 'afiliado', 'afiliar', 'configuracoes', 'identidade', 'socios', 'admin', 'entrar', 'criar', 'criarconta', 'dev', 'esqueci', 'nova', 'confirmar']);
 
 function isMainHost(host: string) {
   return MAIN.includes(host) || host === 'localhost' || host.startsWith('127.') || host.endsWith('.vercel.app') || host.endsWith('.up.railway.app');
 }
 
-const API_PREFIXES = ['/v1/', '/r/', '/webhooks/'];
+const API_PREFIXES = ['/v1/', '/api/v1/', '/r/', '/webhooks/'];
 /** Cabeçalhos que só o site pode definir: o que vier do visitante é descartado. */
 const EDGE_HEADERS = ['x-domma-edge', 'x-domma-client-ip', 'x-domma-client-country', 'x-dm-host'];
 

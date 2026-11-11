@@ -22,6 +22,7 @@ export default {
   async rewrites() {
     return [
       { source: '/v1/:path*', destination: `${API}/v1/:path*` },
+      { source: '/api/v1/:path*', destination: `${API}/api/v1/:path*` }, // API pública
       { source: '/r/:path*', destination: `${API}/r/:path*` },
       { source: '/webhooks/:path*', destination: `${API}/webhooks/:path*` },
     ];
