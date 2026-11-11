@@ -2,6 +2,7 @@ import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Query, R
 import type { Response } from 'express';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CheckoutService } from './checkout.service';
+import { FunnelService } from './funnel.service';
 import { PrismaService } from '../../infra/prisma.service';
 import { Public, Req as R, clientIp } from '../../http/context';
 import { trustedHostHeader } from '../../http/edge';
@@ -52,7 +53,7 @@ function orderFromToken(id: string, t: string | undefined) {
 @Controller()
 @Public()
 export class CheckoutController {
-  constructor(private svc: CheckoutService, private prisma: PrismaService, private events: EventEmitter2, @Inject(GATEWAY) private gateway: GatewayAdapter) {}
+  constructor(private svc: CheckoutService, private funnel: FunnelService, private prisma: PrismaService, private events: EventEmitter2, @Inject(GATEWAY) private gateway: GatewayAdapter) {}
 
   @Get('v1/public/offers/:slug')
   async offer(@Param('slug') slug: string, @Query() q: Record<string, string>, @Req() req: R) {
@@ -189,6 +190,21 @@ export class CheckoutController {
       thank_you_url: offer.thank_you_url, fire_purchase, login_token: onCustomDomain ? null : login_token, login_url, access_by_email: o.status === 'paid' && !login_token,
       sandbox: this.gateway.name === 'sandbox' && o.status === 'pending' ? { charge_id: p?.provider_charge_id } : null,
     });
+  }
+
+  /** Upsell/downsell com 1 clique na página de obrigado (Fase 2). */
+  @Get('v1/orders/:id/upsell')
+  async upsell(@Param('id') id: string, @Query('t') t: string) {
+    orderFromToken(id, t);
+    return toJSON(await this.funnel.state(id));
+  }
+
+  @Post('v1/orders/:id/upsell') @HttpCode(200)
+  async upsellDecide(@Param('id') id: string, @Query('t') t: string, @Body() b: any, @Req() req: R) {
+    orderFromToken(id, t);
+    const d = parse(z.object({ step: z.enum(['upsell', 'downsell']), accept: z.boolean(), method: z.enum(['card', 'pix']).optional(), installments: z.number().int().min(1).max(12).optional() }), b);
+    await rl.limit(`funnel:${id}`, 10, 600);
+    return toJSON(await this.funnel.decide(id, d, { ip: clientIp(req), ua: String(req.headers['user-agent'] || '') }));
   }
 
   /** Link de afiliado (19.10): grava clique, cookie e redireciona ao checkout. */

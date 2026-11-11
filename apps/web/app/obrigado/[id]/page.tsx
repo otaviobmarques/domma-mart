@@ -4,6 +4,7 @@ import { get, post, ApiError } from '@/lib/api';
 import { brl, methodLabel } from '@/lib/format';
 import { track } from '@/lib/pixels';
 import { Button, Card, Skeleton, Banner, Logo, CopyButton } from '@/components/ui';
+import { UpsellCard, type FunnelState } from '@/components/upsell-card';
 
 type Thanks = { order_id: string; code: string; status: string; method: string; total_cents: number; installments: number; email: string; product: { id: string; name: string; type: string; service_url: string | null }; items: { name: string; kind: string; price_cents: number }[]; boleto: { line: string; url: string; due_at: string } | null; thank_you_url: string | null; fire_purchase: boolean; login_token: string | null; login_url?: string | null; access_by_email?: boolean; sandbox: { charge_id: string } | null };
 
@@ -13,11 +14,15 @@ export default function Obrigado({ params }: { params: Promise<{ id: string }> }
   const [d, setD] = useState<Thanks | null>(null);
   const [err, setErr] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
+  const [funnel, setFunnel] = useState<FunnelState | null>(null);
 
   async function load() {
     try {
       const x = await get<Thanks>(`/v1/orders/${id}?t=${encodeURIComponent(t)}`);
-      if (x.status === 'paid' && x.thank_you_url) { location.href = `${x.thank_you_url}${x.thank_you_url.includes('?') ? '&' : '?'}order_id=${x.order_id}&status=paid`; return; }
+      // upsell/downsell com 1 clique: aparece antes de levar à página de obrigado própria do produtor
+      const f = x.status === 'paid' ? await get<FunnelState>(`/v1/orders/${id}/upsell?t=${encodeURIComponent(t)}`).catch(() => null) : null;
+      if (x.status === 'paid' && x.thank_you_url && !f?.step) { goExternal(x); return; }
+      setFunnel(f);
       setD(x);
       // Purchase disparado uma única vez por pedido (o servidor controla)
       if (x.fire_purchase) track('Purchase', { value: x.total_cents / 100, eventId: `purchase_${x.order_id}` });
@@ -26,6 +31,8 @@ export default function Obrigado({ params }: { params: Promise<{ id: string }> }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
   // cartão: confirmação chega por webhook em instantes
   useEffect(() => { if (d && d.status === 'pending' && d.method === 'card') { const x = setTimeout(load, 1500); return () => clearTimeout(x); } /* eslint-disable-next-line */ }, [d]);
+
+  function goExternal(x: Thanks) { location.href = `${x.thank_you_url}${x.thank_you_url!.includes('?') ? '&' : '?'}order_id=${x.order_id}&status=paid`; }
 
   async function access() {
     if (!d) return;
@@ -82,6 +89,7 @@ export default function Obrigado({ params }: { params: Promise<{ id: string }> }
         <Button size="xl" full className="mt-6" loading={busy} onClick={access}>{cta}</Button>
         {d.access_by_email && d.product.type !== 'service' && <p className="mt-3 text-center text-[14px] text-ink-mute">Você já tem conta aqui. Se não estiver conectado, entre na sua área de cliente com o e-mail <b>{d.email}</b> — mandamos um link de acesso para ele.</p>}
       </Card>
+      {funnel && (funnel.step || funnel.accepted.length > 0) && <div className="mt-4"><UpsellCard orderId={id} t={t} initial={funnel} onDone={() => { if (d.thank_you_url) goExternal(d); }} /></div>}
       <Card className="mt-4">
         <p className="font-bold">Precisa de ajuda?</p>
         <p className="mt-1 text-[14.5px] text-ink-soft">Na sua área de cliente você vê suas compras, baixa o recibo, pede reembolso dentro da garantia e fala com o produtor. Não precisa de senha.</p>

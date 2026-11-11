@@ -306,5 +306,59 @@ ok(onCustom.status === 403, 'login do comprador num domínio de produtor é recu
 // M5: caixa de saída de teste não é pública sem DEV_TOOLS (aqui DEV_TOOLS=1); a do back-office exige admin
 ok((await req('GET', '/v1/admin/outbox')).status === 401, 'caixa de saída do back-office exige login');
 
+console.log('\n12) Upsell e downsell com 1 clique na página de obrigado');
+{
+  const prods = (await req('GET', '/v1/products', null, { cookie: 'prod' })).body;
+  const ebook = prods.find(x => x.name.startsWith('E-book 50 Receitas'));
+  const conf = prods.find(x => x.name.startsWith('Curso de Confeitaria'));
+  const confDet = (await req('GET', `/v1/products/${conf.id}`, null, { cookie: 'prod' })).body;
+  const mainOffer = confDet.offers.find(o => o.slug === 'confeitaria');
+  const upOffer = confDet.funnel_candidates.find(c => c.product_id === ebook.id);
+  const self = await req('PUT', `/v1/offers/${mainOffer.id}/funnel`, { upsell_offer_id: mainOffer.id }, { cookie: 'prod' });
+  ok(self.status === 422, 'upsell não pode ser a própria oferta');
+  const lite = await req('POST', `/v1/products/${ebook.id}/offers`, { name: `Básico ${Date.now()}`, price_cents: 1500 }, { cookie: 'prod' });
+  const cfg = await req('PUT', `/v1/offers/${mainOffer.id}/funnel`, { upsell_offer_id: upOffer.offer_id, upsell_headline: 'Leve as receitas de recheio', downsell_offer_id: lite.body.id }, { cookie: 'prod' });
+  ok(cfg.status === 200 && cfg.body.upsell_offer_id === upOffer.offer_id && cfg.body.downsell_offer_id === lite.body.id, 'produtora configura upsell + downsell');
+
+  // cartão: 1 clique cobra o mesmo cartão
+  const u1 = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: buyer(12), method: 'card', card_token: cardToken('4111111111111111') }, { headers: { 'idempotency-key': randomUUID() } });
+  const ut = new URL('http://x' + u1.body.next.url).searchParams.get('t');
+  for (let i = 0; i < 20; i++) { await sleep(300); if ((await req('GET', `/v1/orders/${u1.body.order_id}?t=${ut}`)).body.status === 'paid') break; }
+  ok((await req('GET', `/v1/orders/${u1.body.order_id}/upsell?t=forjado.abc`)).status === 401, 'upsell exige o token da página de obrigado');
+  const st = (await req('GET', `/v1/orders/${u1.body.order_id}/upsell?t=${ut}`)).body;
+  ok(st.step === 'upsell' && st.offer.headline === 'Leve as receitas de recheio' && st.offer.card?.last4 === '1111' && st.offer.methods.includes('card'), 'página de obrigado mostra o upsell com o cartão final 1111');
+  const wrong = await req('POST', `/v1/orders/${u1.body.order_id}/upsell?t=${ut}`, { step: 'downsell', accept: true, method: 'card' });
+  ok(wrong.status === 410 && wrong.body.code === 'OFFER_UNAVAILABLE', 'não dá para pular para o downsell antes de recusar o upsell');
+  const [a1, a2] = await Promise.all([1, 2].map(() => req('POST', `/v1/orders/${u1.body.order_id}/upsell?t=${ut}`, { step: 'upsell', accept: true, method: 'card' })));
+  ok(a1.status === 200 && a2.status === 200 && a1.body.accepted.length === 1 && a2.body.accepted.length === 1 && a1.body.accepted[0].order_id === a2.body.accepted[0].order_id, 'clique duplo cria um pedido só (sem cobrança dupla)');
+  let us; for (let i = 0; i < 20; i++) { await sleep(300); us = (await req('GET', `/v1/orders/${u1.body.order_id}/upsell?t=${ut}`)).body; if (us.accepted[0]?.status === 'paid') break; }
+  ok(us.accepted[0].status === 'paid' && us.accepted[0].total_cents === 2700 && us.step === null, 'upsell pago no cartão (R$ 27) e o funil termina (sem downsell)');
+  const child = (await req('GET', `/v1/orders/${us.accepted[0].order_id}/detail`, null, { cookie: 'prod' })).body;
+  ok(child.total_cents === 2700 && child.splits.reduce((x, y) => x + y.amount_cents, 0) === 2700, 'pedido do upsell tem divisão própria que soma o total');
+  const childTk = new URL('http://x' + us.accepted[0].next.url).searchParams.get('t');
+  ok((await req('GET', `/v1/orders/${us.accepted[0].order_id}/upsell?t=${childTk}`)).body.step === null, 'pedido do upsell não abre outro funil');
+
+  // Pix: recusa o upsell → downsell → gera Pix novo
+  const u2 = await req('POST', `/v1/checkout/${offer.offer_id}/orders`, { customer: { ...buyer(13), document: '111.444.777-35' }, method: 'pix' }, { headers: { 'idempotency-key': randomUUID() } });
+  const u2t = new URL('http://x' + u2.body.next.url).searchParams.get('t');
+  await req('POST', `/v1/dev/sandbox/orders/${u2.body.order_id}/pay`, { t: u2t });
+  let p2; for (let i = 0; i < 20; i++) { await sleep(300); p2 = (await req('GET', `/v1/orders/${u2.body.order_id}/upsell?t=${u2t}`)).body; if (p2.step) break; }
+  ok(p2.step === 'upsell' && p2.offer.card === null && p2.offer.methods.join() === 'pix', 'compra no Pix: upsell oferecido só no Pix');
+  const no = (await req('POST', `/v1/orders/${u2.body.order_id}/upsell?t=${u2t}`, { step: 'upsell', accept: false })).body;
+  ok(no.step === 'downsell' && no.offer.price_cents === 1500, 'recusou o upsell → aparece o downsell (R$ 15)');
+  const yes = (await req('POST', `/v1/orders/${u2.body.order_id}/upsell?t=${u2t}`, { step: 'downsell', accept: true, method: 'pix' })).body;
+  const dn = yes.accepted.find(a => a.step === 'downsell');
+  ok(dn?.status === 'pending' && dn.next?.type === 'pix' && yes.step === null, 'downsell aceito gera um Pix novo');
+  const dnT = new URL('http://x' + dn.next.url).searchParams.get('t');
+  await req('POST', `/v1/dev/sandbox/orders/${dn.order_id}/pay`, { t: dnT });
+  let p3; for (let i = 0; i < 20; i++) { await sleep(300); p3 = (await req('GET', `/v1/orders/${u2.body.order_id}/upsell?t=${u2t}`)).body; if (p3.accepted[0]?.status === 'paid') break; }
+  ok(p3.accepted[0]?.status === 'paid', 'Pix do downsell pago');
+  const again = await req('POST', `/v1/orders/${u2.body.order_id}/upsell?t=${u2t}`, { step: 'upsell', accept: true, method: 'pix' });
+  ok(again.status === 200 && again.body.accepted.length === 1, 'upsell recusado não volta a ser oferecido');
+
+  // limpa para não afetar outros testes
+  await req('PUT', `/v1/offers/${mainOffer.id}/funnel`, { upsell_offer_id: null }, { cookie: 'prod' });
+}
+
 console.log(`\n${pass} ok, ${fail} falhas\n`);
 process.exit(fail ? 1 : 0);

@@ -99,6 +99,9 @@ export class ProductsController {
       coupons: coupons.filter(k => !k.offer_ids.length || offers.some(o => k.offer_ids.includes(o.id))), coproductions,
       affiliations: affiliations.map(a => ({ ...a, name: affUsers.find(u => u.id === a.affiliate_user_id)?.name, email: affUsers.find(u => u.id === a.affiliate_user_id)?.email })),
       bump_candidates: others.map(o => ({ offer_id: o.id, name: o.product.name, price_cents: o.price_cents })),
+      // upsell/downsell: qualquer oferta ativa de pagamento único da conta (inclusive outra oferta do mesmo produto)
+      funnel_candidates: (await this.prisma.offers.findMany({ where: { workspace_id: c.workspaceId, status: 'active', billing_type: 'one_time' }, include: { product: true }, orderBy: { created_at: 'asc' } }))
+        .map(o => ({ offer_id: o.id, product_id: o.product_id, name: o.product.name, offer_name: o.name, price_cents: o.price_cents })),
       fee_hint: `Taxa Domma Mart: 4,49% + R$ 1,49 por venda. Sem mensalidade.`,
     });
   }
@@ -195,6 +198,31 @@ export class ProductsController {
       ...d.items.filter(i => valid.some(v => v.id === i.offer_id) && i.offer_id !== id).map((i, k) => this.prisma.offer_bumps.create({ data: { offer_id: id, bump_offer_id: i.offer_id, headline: i.headline, position: k } })),
     ]);
     return { ok: true };
+  }
+
+  /** Funil pós-compra: upsell (e downsell se o comprador recusar) com 1 clique na página de obrigado. */
+  @Put('offers/:id/funnel') @Producer('products.edit')
+  async funnel(@Ctx() c: ProducerCtx, @Param('id') id: string, @Body() b: any) {
+    await this.ownOffer(c, id);
+    const d = parse(z.object({
+      upsell_offer_id: z.string().uuid().nullable(), upsell_headline: z.string().max(120).nullable().optional(), upsell_text: z.string().max(600).nullable().optional(),
+      downsell_offer_id: z.string().uuid().nullable().optional(), downsell_headline: z.string().max(120).nullable().optional(), downsell_text: z.string().max(600).nullable().optional(),
+    }), b);
+    const ids = [d.upsell_offer_id, d.downsell_offer_id].filter(Boolean) as string[];
+    const found = await this.prisma.offers.findMany({ where: { id: { in: ids }, workspace_id: c.workspaceId } });
+    for (const x of ids) {
+      const o = found.find(f => f.id === x);
+      if (!o || x === id) throw new AppError('VALIDATION_ERROR', { fields: { upsell_offer_id: 'Escolha outra oferta sua.' } });
+      if (o.billing_type !== 'one_time') throw new AppError('VALIDATION_ERROR', { fields: { upsell_offer_id: 'Upsell e downsell são de pagamento único (assinatura não).' } });
+    }
+    if (d.downsell_offer_id && !d.upsell_offer_id) throw new AppError('VALIDATION_ERROR', { fields: { downsell_offer_id: 'O downsell aparece quando o comprador recusa o upsell: escolha o upsell primeiro.' } });
+    if (d.downsell_offer_id && d.downsell_offer_id === d.upsell_offer_id) throw new AppError('VALIDATION_ERROR', { fields: { downsell_offer_id: 'O downsell precisa ser outra oferta (normalmente mais barata).' } });
+    const updated = await this.prisma.offers.update({ where: { id }, data: {
+      upsell_offer_id: d.upsell_offer_id, upsell_headline: d.upsell_offer_id ? d.upsell_headline ?? null : null, upsell_text: d.upsell_offer_id ? d.upsell_text ?? null : null,
+      downsell_offer_id: d.upsell_offer_id ? d.downsell_offer_id ?? null : null, downsell_headline: d.downsell_offer_id ? d.downsell_headline ?? null : null, downsell_text: d.downsell_offer_id ? d.downsell_text ?? null : null,
+    } });
+    await this.audit.log({ actorId: c.userId, action: 'offer.funnel', target: `offer:${id}`, after: { upsell: updated.upsell_offer_id, downsell: updated.downsell_offer_id } });
+    return toJSON(updated);
   }
 
   // ───── Cupons (RN-20..22) ─────

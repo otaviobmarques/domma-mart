@@ -4462,6 +4462,63 @@
         }
       }
     },
+    "/v1/offers/{id}/funnel": {
+      "put": {
+        "operationId": "Products_funnel",
+        "tags": [
+          "offers"
+        ],
+        "summary": "funnel",
+        "description": "Acesso: producer (permissão products.edit). Exige o cabeçalho X-Requested-With: domma (CSRF).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/onboarding/steps": {
       "get": {
         "operationId": "Dashboard_steps",
@@ -4856,6 +4913,100 @@
             "producerSession": []
           }
         ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orders/{id}/upsell": {
+      "get": {
+        "operationId": "Checkout_upsell",
+        "tags": [
+          "orders"
+        ],
+        "summary": "upsell",
+        "description": "Acesso: public.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "Checkout_upsellDecide",
+        "tags": [
+          "orders"
+        ],
+        "summary": "upsell decide",
+        "description": "Acesso: public.",
+        "security": [],
         "parameters": [
           {
             "name": "id",
