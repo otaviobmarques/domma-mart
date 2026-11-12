@@ -5,5 +5,5 @@ storage/
 .env
 *.log
 .DS_Store
-dump.rdb
+*.rdb
 *.tsbuildinfo
