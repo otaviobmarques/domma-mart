@@ -14,6 +14,8 @@ import { NotifyService } from '../../infra/notify.service';
 import { urls } from '../../common/urls';
 import { formatBRL } from '../../domain/money';
 import { RiskService, CardAttempt } from '../risk/risk.service';
+import { assign } from '../../domain/abtest';
+import { randomBytes } from 'node:crypto';
 import { LedgerService } from '../ledger/ledger.service';
 
 export interface CreateOrderBody {
@@ -69,12 +71,39 @@ export class CheckoutService {
     if (d && d.status === 'active' && d.workspace_id !== workspaceId) throw new AppError('OFFER_UNAVAILABLE');
   }
 
-  async publicOffer(slug: string, tracking: Record<string, string>, host?: string) {
-    const offer = await this.loadSellableOffer({ slug });
-    await this.assertHost(offer.workspace_id, host);
+  /**
+   * Teste A/B (Fase 2): no link da oferta A (controle), parte dos visitantes vê a oferta B.
+   * A versão fica guardada no cookie do visitante (sempre a mesma). Teste encerrado com vencedor B:
+   * o link de A passa a mostrar B para todos. Pausado: todos veem A, sem contar no teste.
+   */
+  private async serveExperiment(control: Awaited<ReturnType<CheckoutService['loadSellableOffer']>>, ab: Record<string, string>) {
+    const running = await this.prisma.checkout_experiments.findFirst({ where: { control_offer_id: control.id, status: 'running' }, orderBy: { created_at: 'desc' } });
+    if (running) {
+      let variant = ab[running.id] === 'a' || ab[running.id] === 'b' ? (ab[running.id] as 'a' | 'b') : assign(running.split_pct, randomBytes(4).readUInt32BE() / 2 ** 32);
+      let offer = control;
+      if (variant === 'b') {
+        try { offer = await this.loadSellableOffer({ id: running.variant_offer_id }); } catch { variant = 'a'; } // B saiu do ar: todos veem A
+      }
+      return { offer, experiment: { id: running.id, variant } };
+    }
+    const won = await this.prisma.checkout_experiments.findFirst({ where: { control_offer_id: control.id, status: 'ended', winner: 'b' }, orderBy: { ended_at: 'desc' } });
+    if (won) { try { return { offer: await this.loadSellableOffer({ id: won.variant_offer_id }), experiment: null }; } catch { /* vencedora fora do ar: volta para A */ } }
+    return { offer: control, experiment: null };
+  }
+
+  /** Teste A/B em andamento que envolve esta oferta (como A ou B). */
+  async experimentOf(offerId: string) {
+    return this.prisma.checkout_experiments.findFirst({ where: { status: 'running', OR: [{ control_offer_id: offerId }, { variant_offer_id: offerId }] }, orderBy: { created_at: 'desc' } });
+  }
+
+  async publicOffer(slug: string, tracking: Record<string, string>, host?: string, visit: { visitor?: string; ab?: Record<string, string> } = {}) {
+    const control = await this.loadSellableOffer({ slug });
+    await this.assertHost(control.workspace_id, host);
+    const { offer, experiment } = await this.serveExperiment(control, visit.ab ?? {});
+    const visitor = visit.visitor && /^[a-z0-9]{16,40}$/.test(visit.visitor) ? visit.visitor : randomBytes(12).toString('hex');
     const p = offer.product;
     const bumps = await this.prisma.offers.findMany({ where: { id: { in: offer.bumps.map(b => b.bump_offer_id) }, status: 'active' }, include: { product: true } });
-    await this.prisma.checkout_views.create({ data: { workspace_id: offer.workspace_id, offer_id: offer.id, tracking } });
+    await this.prisma.checkout_views.create({ data: { workspace_id: offer.workspace_id, offer_id: offer.id, tracking, experiment_id: experiment?.id, variant: experiment?.variant, visitor } });
     const owner = await this.prisma.users.findUnique({ where: { id: p.workspace.owner_id } });
     const options = installmentOptions(offer.price_cents, offer.max_installments, offer.installment_interest);
     return {
@@ -88,6 +117,7 @@ export class CheckoutService {
       bumps: offer.bumps.map(b => { const o = bumps.find(x => x.id === b.bump_offer_id); return o && { offer_id: o.id, name: o.product.name, headline: b.headline, price_cents: o.price_cents, cover_url: o.product.cover_url }; }).filter(Boolean),
       gateway: this.gateway.name, gateway_public_key: this.gateway.publicConfig().publicKey, three_ds: this.gateway.publicConfig().threeDS ?? null, one_click: !!this.gateway.saveCard,
       turnstile_site_key: process.env.TURNSTILE_SITE_KEY || null,
+      experiment, visitor,
     };
   }
 
@@ -95,7 +125,12 @@ export class CheckoutService {
     const c = await this.prisma.coupons.findUnique({ where: { workspace_id_code: { workspace_id: workspaceId, code: code.toUpperCase() } } });
     const now = new Date();
     if (!c || !c.active || (c.starts_at && c.starts_at > now) || (c.ends_at && c.ends_at < now)) return null;
-    if (c.offer_ids.length && !c.offer_ids.includes(offerId)) return null;
+    if (c.offer_ids.length && !c.offer_ids.includes(offerId)) {
+      // teste A/B: cupom da oferta A também vale para quem caiu na B (e vice-versa)
+      const exp = await this.experimentOf(offerId);
+      const partner = exp && (exp.control_offer_id === offerId ? exp.variant_offer_id : exp.control_offer_id);
+      if (!partner || !c.offer_ids.includes(partner)) return null;
+    }
     if (c.max_uses != null && c.uses >= c.max_uses) return null;
     if (documentHash && c.max_uses_per_cpf != null) {
       // contagem por CPF via customers.document_hash
@@ -125,7 +160,7 @@ export class CheckoutService {
   }
 
   /** POST /v1/checkout/{offerId}/orders — seção 8.2/8.3 e contrato 22.1. */
-  async createOrder(offerId: string, body: CreateOrderBody, meta: { ip: string; ua: string; idempotencyKey: string; affiliateCookie?: string; host?: string; country?: string }) {
+  async createOrder(offerId: string, body: CreateOrderBody, meta: { ip: string; ua: string; idempotencyKey: string; affiliateCookie?: string; host?: string; country?: string; cookies?: Record<string, string> }) {
     // RN-30: mesma chave devolve o mesmo resultado sem nova cobrança
     const prior = await this.prisma.orders.findUnique({ where: { idempotency_key: meta.idempotencyKey }, include: { payments: { orderBy: { created_at: 'desc' }, take: 1 } } });
     if (prior) return this.responseFor(prior, prior.payments[0]);
@@ -219,8 +254,15 @@ export class CheckoutService {
       }
     }
 
+    // Teste A/B: a venda conta para a versão do cookie do visitante, se bater com a oferta comprada
+    const exp = await this.experimentOf(offer.id);
+    const armOf = exp ? (meta.cookies?.[`dm_ab_${exp.id}`] as 'a' | 'b' | undefined) : undefined;
+    const arm = exp && armOf && (armOf === 'a' ? exp.control_offer_id : exp.variant_offer_id) === offer.id ? armOf : null;
+    // o cookie do afiliado foi gravado no link da oferta A
+    const affCookie = meta.affiliateCookie || (exp ? meta.cookies?.[`dm_aff_${exp.control_offer_id}`] : undefined);
+
     // Afiliado (RN-70/71)
-    const affiliation = await this.resolveAffiliate(offer.product_id, body.affiliate_code || meta.affiliateCookie, { docHash, email, ipHash, fingerprint: body.device_fingerprint });
+    const affiliation = await this.resolveAffiliate(offer.product_id, body.affiliate_code || affCookie, { docHash, email, ipHash, fingerprint: body.device_fingerprint });
 
     // Taxa (RN-02..05) e divisão (RN-09/10), congeladas no pedido (RN-06)
     const tier = ws.custom_fee_bps ?? (await this.prisma.fee_tiers_cache.findUnique({ where: { workspace_id: ws.id } }))?.fee_bps ?? null;
@@ -251,6 +293,7 @@ export class CheckoutService {
           installments: n, subtotal_cents: subtotal, discount_cents: discount, interest_cents: plan.interestCents, total_cents: plan.totalCents,
           coupon_id: coupon?.id, affiliate_workspace_id: affiliation?.affiliate_workspace_id, tracking: sanitizeTracking(body.tracking),
           ip_hash: ipHash, user_agent: meta.ua.slice(0, 400), device_fingerprint: body.device_fingerprint?.slice(0, 100), idempotency_key: meta.idempotencyKey,
+          experiment_id: arm ? exp!.id : null, experiment_variant: arm,
           items: { create: [{ product_id: offer.product_id, offer_id: offer.id, kind: 'main', price_cents: offer.price_cents - discount }, ...bumpOffers.map(b => ({ product_id: b.product_id, offer_id: b.id, kind: 'bump', price_cents: b.price_cents }))] },
           splits: { create: split.map(s => ({ beneficiary_type: s.beneficiary_type, beneficiary_id: s.beneficiary_id, amount_cents: s.amount_cents, rule: { ...s.rule, fee: fee.rule } as any })) },
         },
