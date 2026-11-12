@@ -3,9 +3,13 @@ import { useEffect, useState } from 'react';
 import { get } from '@/lib/api';
 import { brl, ago, methodLabel, dateTime } from '@/lib/format';
 import { Button, Card, Field, Select, Skeleton, StatusBadge, Empty, cx } from '@/components/ui';
+import { CustomersReport, SubscriptionsReport } from '@/components/retention-reports';
+
+const TABS = [['lista', 'Lista'], ['relatorio', 'Visão geral'], ['clientes', 'Clientes e LTV'], ['assinaturas', 'Assinaturas']] as const;
+type Tab = (typeof TABS)[number][0];
 
 export default function Vendas() {
-  const [tab, setTab] = useState<'lista' | 'relatorio'>('lista');
+  const [tab, setTab] = useState<Tab>('lista');
   const [f, setF] = useState({ q: '', status: '', method: '', product_id: '', from: '', to: '', affiliate: '', utm_source: '' });
   const [rows, setRows] = useState<any[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -17,7 +21,7 @@ export default function Vendas() {
     const r = await get(`/v1/orders?${q}`);
     setRows(more ? [...(rows ?? []), ...r.data] : r.data); setCursor(r.next_cursor);
   };
-  useEffect(() => { get('/v1/products').then(setProducts); }, []);
+  useEffect(() => { get('/v1/products').then(setProducts); const a = new URLSearchParams(location.search).get('aba'); if (TABS.some(([k]) => k === a)) setTab(a as Tab); }, []);
   useEffect(() => { const t = setTimeout(() => load(), 250); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [f]);
   useEffect(() => { if (tab === 'relatorio') { const q = qs(); get(`/v1/reports/overview?${q}`).then(setRep); } /* eslint-disable-next-line */ }, [tab, f.from, f.to]);
   const max = rep ? Math.max(1, ...rep.by_day.map((d: any) => d.cents)) : 1;
@@ -26,8 +30,10 @@ export default function Vendas() {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-[26px] font-extrabold">Vendas</h1>
-        <div className="flex gap-1 rounded-ctl bg-white p-1 ring-1 ring-line">{(['lista', 'relatorio'] as const).map(t => <button key={t} onClick={() => setTab(t)} className={cx('min-h-[36px] rounded-[8px] px-3 text-[14px] font-bold', tab === t ? 'bg-action text-white' : 'text-ink-soft')}>{t === 'lista' ? 'Lista' : 'Relatórios'}</button>)}</div>
+        <div className="flex flex-wrap gap-1 rounded-ctl bg-white p-1 ring-1 ring-line" role="tablist">{TABS.map(([t, l]) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cx('min-h-[36px] rounded-[8px] px-3 text-[14px] font-bold', tab === t ? 'bg-action text-white' : 'text-ink-soft')}>{l}</button>)}</div>
       </div>
+      {(tab === 'clientes' || tab === 'assinaturas') && <div className="mt-4">{tab === 'clientes' ? <CustomersReport products={products} /> : <SubscriptionsReport products={products} />}</div>}
+      {(tab === 'lista' || tab === 'relatorio') && <>
       <Card className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Buscar" placeholder="Nome, e-mail, CPF ou código" value={f.q} onChange={e => setF({ ...f, q: e.target.value })} className="sm:col-span-2" />
         <Field label="De" type="date" value={f.from} onChange={e => setF({ ...f, from: e.target.value })} />
@@ -72,6 +78,7 @@ export default function Vendas() {
           <Card><h2 className="font-extrabold">Origem (UTM)</h2><ul className="mt-2 divide-y divide-line">{rep.by_source.map((s: any) => <li key={s.source} className="flex min-h-[44px] items-center justify-between"><span>{s.source}</span><span className="num">{s.n} · {brl(s.cents)}</span></li>)}</ul></Card>
         </div>
       )}
+      </>}
     </div>
   );
 }

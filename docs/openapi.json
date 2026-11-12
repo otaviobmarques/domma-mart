@@ -7951,6 +7951,82 @@
         }
       }
     },
+    "/v1/reports/customers": {
+      "get": {
+        "operationId": "Reports_customers",
+        "tags": [
+          "reports"
+        ],
+        "summary": "customers",
+        "description": "Acesso: producer (permissão orders.view).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/reports/customers.csv": {
+      "get": {
+        "operationId": "Reports_customersCsv",
+        "tags": [
+          "reports"
+        ],
+        "summary": "customers csv",
+        "description": "Acesso: producer (permissão orders.view).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/reports/overview": {
       "get": {
         "operationId": "Dashboard_report",
@@ -7958,6 +8034,82 @@
           "reports"
         ],
         "summary": "report",
+        "description": "Acesso: producer (permissão orders.view).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/reports/subscriptions": {
+      "get": {
+        "operationId": "Reports_subscriptions",
+        "tags": [
+          "reports"
+        ],
+        "summary": "subscriptions",
+        "description": "Acesso: producer (permissão orders.view).",
+        "security": [
+          {
+            "producerSession": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro (RFC 7807)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/reports/subscriptions.csv": {
+      "get": {
+        "operationId": "Reports_subscriptionsCsv",
+        "tags": [
+          "reports"
+        ],
+        "summary": "subscriptions csv",
         "description": "Acesso: producer (permissão orders.view).",
         "security": [
           {

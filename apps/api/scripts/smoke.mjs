@@ -620,5 +620,37 @@ console.log('\n16) Teste A/B do checkout');
   ok((await req('POST', `/v1/experiments/${ex.body.id}/pause`, {}, P)).status === 409, 'teste encerrado não volta a rodar');
 }
 
+console.log('\n17) Relatórios: coortes, LTV e assinaturas');
+{
+  const P = { cookie: 'prod' };
+  const rc = await req('GET', '/v1/reports/customers', null, P);
+  const cur = rc.body.cohorts?.[rc.body.cohorts.length - 1];
+  ok(rc.status === 200 && rc.body.cohorts.length === 12 && cur.customers > 0 && cur.retention[0] === 100 && cur.retention[1] === null, `coortes por mês da primeira compra (${cur?.customers} clientes neste mês)`);
+  ok(rc.body.summary.customers >= cur.customers && rc.body.summary.ltv_cents > 0 && rc.body.summary.orders_per_customer >= 1, `LTV médio por cliente (${rc.body.summary.ltv_cents})`);
+  const sumC = (t) => t.reduce((a, x) => a + x.customers, 0);
+  ok(rc.body.by_source.length > 0 && sumC(rc.body.by_source) === rc.body.summary.customers && sumC(rc.body.by_product) === rc.body.summary.customers && rc.body.by_product.some(x => x.key.startsWith('Curso de Confeitaria')), 'LTV por canal (UTM da primeira compra) e por produto de entrada: cada cliente conta uma vez');
+  const conf = (await req('GET', '/v1/products', null, P)).body.find(x => x.name.startsWith('Curso de Confeitaria'));
+  const rf = await req('GET', `/v1/reports/customers?product_id=${conf.id}&months=6`, null, P);
+  ok(rf.status === 200 && rf.body.cohorts.length === 6 && rf.body.summary.customers <= rc.body.summary.customers, 'filtro por produto e por período');
+  ok((await req('GET', '/v1/reports/customers?months=40', null, P)).body.cohorts.length === 24, 'período limitado a 24 meses');
+  ok((await req('GET', '/v1/reports/customers?product_id=xyz', null, P)).status === 422, 'produto inválido → 422');
+  const csvR = await fetch(API + '/v1/reports/customers.csv', { headers: { cookie: jar.prod } });
+  ok(csvR.headers.get('content-type')?.includes('text/csv') && (await csvR.text()).includes('coorte,clientes,retencao_m0_%'), 'exportar coortes em CSV');
+  // assinatura de verdade: produto de assinatura, compra no cartão, renovação mensal
+  const sp = await req('POST', '/v1/products', { type: 'subscription', name: `Clube do Bolo ${Date.now()}`, price_cents: 4990, interval: 'month' }, P);
+  const md = await req('POST', `/v1/products/${sp.body.product_id}/modules`, { title: 'Receitas do mês' }, P);
+  await req('POST', `/v1/modules/${md.body.id}/lessons`, { kind: 'text', title: 'Bolo de cenoura', body: 'Receita completa.' }, P);
+  await req('POST', `/v1/products/${sp.body.product_id}/publish`, null, P);
+  const sOffer = (await req('GET', `/v1/products/${sp.body.product_id}`, null, P)).body.offers[0];
+  const cpfS = (() => { const d = Array.from({ length: 9 }, () => Math.floor(Math.random() * 10)); for (const n of [9, 10]) { const s = d.reduce((a, x, i) => a + x * (n + 1 - i), 0); d.push((s * 10) % 11 % 10); } return d.join(''); })();
+  const so = await req('POST', `/v1/checkout/${sOffer.id}/orders`, { customer: { ...buyer(40), document: cpfS }, method: 'card', card_token: cardToken('4111111111111111'), device_fingerprint: randomUUID().replace(/-/g, '') }, { headers: { 'idempotency-key': randomUUID(), 'x-forwarded-for': '198.51.100.60' } });
+  ok(so.status === 201, 'assinatura comprada no cartão');
+  let rs; for (let i = 0; i < 20; i++) { await sleep(400); rs = (await req('GET', `/v1/reports/subscriptions?product_id=${sp.body.product_id}`, null, P)).body; if (rs.summary.active) break; }
+  ok(rs.summary.active === 1 && rs.summary.mrr_cents === 4990 && rs.summary.arpu_cents === 4990, `MRR e ticket mensal da assinatura ativa (${rs.summary.mrr_cents})`);
+  ok(rs.series.length === 12 && rs.series[11].new === 1 && rs.series[11].mrr_cents === 4990 && rs.cohorts[11].active_pct[0] === 100, 'série mensal (novas, MRR) e coorte de assinantes');
+  const csvS = await fetch(API + '/v1/reports/subscriptions.csv', { headers: { cookie: jar.prod } });
+  ok((await csvS.text()).includes('mes,ativas_no_inicio,novas,encerradas'), 'exportar série de assinaturas em CSV');
+}
+
 console.log(`\n${pass} ok, ${fail} falhas\n`);
 process.exit(fail ? 1 : 0);

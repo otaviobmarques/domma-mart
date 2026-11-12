@@ -23,6 +23,7 @@ import { RiskController } from './modules/risk/risk.controller';
 import { MarketplaceController } from './modules/affiliates/marketplace.controller';
 import { PublicApiController } from './modules/public-api/public-api.controller';
 import { ExperimentsController } from './modules/products/experiments.controller';
+import { ReportsController } from './modules/dashboard/reports.controller';
 import { CheckoutController } from './modules/checkout/checkout.controller';
 import { WebhooksController, SandboxController } from './modules/webhooks/webhooks.controller';
 import { JobsService } from './modules/jobs/jobs.service';
@@ -52,7 +53,7 @@ function gatewayFactory() {
 
 @Module({
   imports: [EventEmitterModule.forRoot(), DiscoveryModule],
-  controllers: [RiskController, MarketplaceController, PublicApiController, ExperimentsController, 
+  controllers: [RiskController, MarketplaceController, PublicApiController, ExperimentsController, ReportsController, 
     HealthController, CheckoutController, WebhooksController, SandboxController, AuthController, CustomerController, OptOutController,
     ProductsController, MembersController, FilesController, DashboardController, KycController, AffiliatesController, SettingsController,
     AdminController, DevController, AdminOutboxController, DomainsController, AdjustmentsController, GoogleAuthController, PrivacyController,
