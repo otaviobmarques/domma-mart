@@ -116,7 +116,7 @@ export class PrivacyService {
     for (const k of [email, phone].filter(Boolean)) await this.prisma.opt_outs.upsert({ where: { key_hash: blindIndex(k) }, create: { key_hash: blindIndex(k) }, update: {} });
     const last = await this.prisma.orders.findFirst({ where: { customer_id: c.id, paid_at: { not: null } }, orderBy: { paid_at: 'desc' } });
     const activeSub = await this.prisma.subscriptions.count({ where: { customer_id: c.id, status: { in: ['active', 'trialing', 'past_due'] } } });
-    if (activeSub) await this.prisma.subscriptions.updateMany({ where: { customer_id: c.id, status: { in: ['active', 'trialing', 'past_due'] } }, data: { cancel_at_period_end: true } });
+    if (activeSub) await this.prisma.subscriptions.updateMany({ where: { customer_id: c.id, status: { in: ['active', 'trialing', 'past_due'] } }, data: { cancel_at_period_end: true, cancel_requested_at: new Date() } });
     if (!last) {
       await this.anonymizeCustomer(c.id);
       return this.prisma.privacy_requests.update({ where: { id: r.id }, data: { status: 'done', decided_at: new Date(), resolution: 'Seus dados foram apagados. Não havia compras pagas que a lei mande guardar.' } });

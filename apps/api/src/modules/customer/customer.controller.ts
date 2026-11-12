@@ -175,7 +175,7 @@ export class CustomerController {
   async cancel(@Cust() cu: CustomerCtx, @Param('id') id: string) {
     const s = await this.prisma.subscriptions.findFirst({ where: { id, customer_id: cu.customerId } });
     if (!s) throw new AppError('NOT_FOUND');
-    await this.prisma.subscriptions.update({ where: { id }, data: { cancel_at_period_end: true } }); // RN-46
+    await this.prisma.subscriptions.update({ where: { id }, data: { cancel_at_period_end: true, cancel_requested_at: new Date() } }); // RN-46
     return { ok: true, access_until: s.current_period_end };
   }
 

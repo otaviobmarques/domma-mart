@@ -202,7 +202,7 @@ export class OrdersService {
       const items = await tx.order_items.findMany({ where: { order_id: orderId } });
       await tx.enrollments.updateMany({ where: { order_item_id: { in: items.map(i => i.id) } }, data: { status: 'revoked' } }); // RN-33
       if (refundId) await tx.refunds.update({ where: { id: refundId }, data: { status: 'done' } });
-      if (order.subscription_id) await tx.subscriptions.update({ where: { id: order.subscription_id }, data: { status: 'canceled', next_charge_at: null } });
+      if (order.subscription_id) await tx.subscriptions.update({ where: { id: order.subscription_id }, data: { status: 'canceled', next_charge_at: null, ended_at: new Date(), end_reason: 'refund' } });
     });
     this.flush(pending);
   }

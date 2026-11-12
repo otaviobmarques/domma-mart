@@ -278,7 +278,7 @@ export class JobsService implements OnApplicationBootstrap {
     const due = await this.prisma.subscriptions.findMany({ where: { status: { in: ['active', 'past_due'] }, next_charge_at: { lte: new Date() } }, take: 200 });
     for (const s of due) {
       if (s.cancel_at_period_end) {
-        await this.prisma.subscriptions.update({ where: { id: s.id }, data: { status: 'canceled', next_charge_at: null } });
+        await this.prisma.subscriptions.update({ where: { id: s.id }, data: { status: 'canceled', next_charge_at: null, ended_at: new Date(), end_reason: 'voluntary' } });
         await this.revokeSubscriptionAccess(s.id, 'expired');
         continue;
       }
@@ -307,7 +307,7 @@ export class JobsService implements OnApplicationBootstrap {
       const retry = s.retry_count + 1;
       const next = [1, 3, 5][s.retry_count]; // D+1, D+3, D+5
       if (next == null) {
-        await this.prisma.subscriptions.update({ where: { id: s.id }, data: { status: 'defaulted', next_charge_at: null } });
+        await this.prisma.subscriptions.update({ where: { id: s.id }, data: { status: 'defaulted', next_charge_at: null, ended_at: new Date(), end_reason: 'payment_failed' } });
         await this.revokeSubscriptionAccess(s.id, 'suspended');
       } else {
         await this.prisma.subscriptions.update({ where: { id: s.id }, data: { status: 'past_due', retry_count: retry, next_charge_at: new Date(Date.now() + next * 86400000) } });
