@@ -652,5 +652,63 @@ console.log('\n17) Relatórios: coortes, LTV e assinaturas');
   ok((await csvS.text()).includes('mes,ativas_no_inicio,novas,encerradas'), 'exportar série de assinaturas em CSV');
 }
 
+console.log('\n18) API pública — escrita: produto completo só pela API');
+{
+  const P = { cookie: 'prod' };
+  const call = async (method, path, key, body) => {
+    const r = await fetch(API + '/api/v1' + path, { method, headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = t; }
+    return { status: r.status, body: j };
+  };
+  const ro = (await req('POST', '/v1/settings/api-keys', { name: 'Só leitura', scopes: ['products:read'] }, P)).body.key;
+  const kw = (await req('POST', '/v1/settings/api-keys', { name: 'Integração de catálogo', scopes: ['products:read', 'products:write', 'affiliates:write'] }, P)).body.key;
+  ok((await call('POST', '/products', ro, { type: 'course', name: 'Teste', price_cents: 9700 })).status === 403, 'sem products:write não cria produto');
+  const main = await call('POST', '/products', kw, { type: 'course', name: `Curso de Bolos Caseiros ${Date.now()}`, price_cents: 29700 });
+  ok(main.status === 201 && main.body.product_id && main.body.offer_id, 'produto criado pela API (com a primeira oferta)');
+  const pid = main.body.product_id;
+  ok((await call('PATCH', `/products/${pid}`, kw, { description: 'Do zero ao primeiro bolo vendido.', guarantee_days: 15, affiliation_enabled: true, affiliation_auto_approve: false, affiliate_commission_bps: 3500 })).status === 200, 'descrição, garantia e afiliação pela API');
+  ok((await call('POST', `/products/${pid}/publish`, kw)).body.title?.includes('aula'), 'publicar sem conteúdo é recusado com explicação');
+  const mod = await call('POST', `/products/${pid}/modules`, kw, { title: 'Começando' });
+  ok((await call('POST', `/modules/${mod.body.id}/lessons`, kw, { title: 'Vídeo', kind: 'video', body: 'x' })).status === 422, 'aula em vídeo pela API é recusada (vídeo vai pelo painel)');
+  const les = await call('POST', `/modules/${mod.body.id}/lessons`, kw, { title: 'Boas-vindas', kind: 'text', body: 'Olá! Vamos começar.' });
+  ok(les.status === 201 && (await call('PATCH', `/lessons/${les.body.id}`, kw, { drip_days: 2 })).body.drip_days === 2, 'módulo e aula em texto, com liberação programada');
+  const pub = await call('POST', `/products/${pid}/publish`, kw);
+  ok(pub.status === 200 && pub.body.status === 'active' && pub.body.checkout_url, 'publicado pela API (moderação automática)');
+  // oferta especial (order bump) e upsell: um segundo produto
+  const extra = await call('POST', '/products', kw, { type: 'service', name: `Consultoria de Precificação ${Date.now()}`, price_cents: 9700 });
+  await call('PATCH', `/products/${extra.body.product_id}`, kw, { service_url: 'https://agenda.exemplo.com/consultoria' });
+  await call('POST', `/products/${extra.body.product_id}/publish`, kw);
+  const bump = await call('PUT', `/offers/${main.body.offer_id}/bumps`, kw, { items: [{ offer_id: extra.body.offer_id, headline: 'Adicione 1 hora de consultoria' }] });
+  ok(bump.status === 200, 'oferta especial (order bump) configurada pela API');
+  const fun = await call('PUT', `/offers/${main.body.offer_id}/funnel`, kw, { upsell_offer_id: extra.body.offer_id, upsell_headline: 'Que tal uma consultoria?' });
+  ok(fun.status === 200 && fun.body.upsell_offer_id === extra.body.offer_id, 'upsell com 1 clique configurado pela API');
+  const pr = await call('PATCH', `/offers/${main.body.offer_id}`, kw, { price_cents: 24700, max_installments: 6 });
+  ok(pr.status === 200 && pr.body.price_cents === 24700, 'preço e parcelas da oferta pela API');
+  const det = await call('GET', `/products/${pid}`, ro);
+  const slug = det.body.offers[0].slug;
+  const pubOffer = (await req('GET', `/v1/public/offers/${slug}`)).body;
+  ok(pubOffer.price_cents === 24700 && pubOffer.bumps.length === 1 && pubOffer.bumps[0].headline === 'Adicione 1 hora de consultoria', 'checkout mostra o preço novo e a oferta especial criada pela API');
+  ok((await call('PUT', `/offers/${main.body.offer_id}/bumps`, kw, { items: [{ offer_id: main.body.offer_id, headline: 'x' }] })).status === 422, 'oferta não vira oferta especial dela mesma (422)');
+  ok((await call('PUT', `/offers/${main.body.offer_id}/bumps`, kw, { items: [{ offer_id: extra.body.offer_id }, { offer_id: extra.body.offer_id }] })).status === 422, 'oferta repetida na lista → 422 (antes dava erro interno)');
+  ok((await call('PUT', `/offers/${main.body.offer_id}/bumps`, kw, { items: [{ offer_id: '00000000-0000-7000-8000-000000000000' }] })).status === 422 && (await req('GET', `/v1/public/offers/${slug}`)).body.bumps.length === 1, 'oferta de outra conta → 422, e a oferta especial anterior continua');
+  ok((await call('PATCH', `/products/00000000-0000-7000-8000-000000000000`, kw, { name: 'Invasão' })).status === 404 && (await call('PATCH', '/products/abc', kw, { name: 'x' })).status === 404, 'produto de outra conta ou id inválido → 404');
+  // segunda oferta, duplicar e teste A/B
+  const o2 = await call('POST', `/products/${pid}/offers`, kw, { name: 'Anual', price_cents: 39700 });
+  const dup = await call('POST', `/offers/${main.body.offer_id}/duplicate`, kw, {});
+  ok(o2.status === 201 && dup.status === 201 && dup.body.id !== main.body.offer_id, 'nova oferta e oferta duplicada pela API');
+  const ex = await call('POST', `/products/${pid}/experiments`, kw, { name: 'Preço', control_offer_id: main.body.offer_id, variant_offer_id: dup.body.id });
+  ok(ex.status === 201 && (await call('POST', `/experiments/${ex.body.id}/end`, kw, { winner: 'a' })).body.status === 'ended', 'teste A/B começado e encerrado pela API');
+  ok((await call('POST', `/products/${pid}/materials`, kw, { kind: 'text', title: 'Legenda', body: 'Aprenda a vender bolo de casa!' })).status === 201, 'material de afiliado pela API');
+  // afiliado pede, a integração aprova
+  await req('POST', '/v1/affiliate/request', { product_id: pid, message: 'Tenho um canal de receitas' }, { cookie: 'bru' });
+  const affs = (await call('GET', `/products/${pid}`, ro)).body.affiliations;
+  ok(affs[0]?.status === 'pending' && affs[0].email.includes('*'), 'pedido de afiliação aparece (e-mail mascarado)');
+  ok((await call('POST', `/affiliates/${affs[0].id}/approve`, ro)).status === 403, 'sem affiliates:write não aprova');
+  ok((await call('POST', `/affiliates/${affs[0].id}/approve`, kw)).status === 200 && (await call('GET', `/products/${pid}`, ro)).body.affiliations[0].status === 'active', 'afiliado aprovado pela API');
+  ok((await call('GET', '/openapi.json')).body.paths['/offers/{id}/bumps']?.put && (await call('GET', '/openapi.json')).body.paths['/products'].post, 'especificação OpenAPI lista as rotas de escrita');
+  const audit = (await req('GET', '/v1/admin/audit?target=offer:' + main.body.offer_id, null, { cookie: 'adm' })).body.rows ?? [];
+  ok(audit.some(r => r.action === 'offer.update'), 'alterações pela API ficam na auditoria');
+}
+
 console.log(`\n${pass} ok, ${fail} falhas\n`);
 process.exit(fail ? 1 : 0);

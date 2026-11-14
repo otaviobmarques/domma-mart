@@ -14,6 +14,8 @@ export function buildPublicSpec() {
   };
   const ok = (schema: any) => ({ '200': { description: 'OK', content: { 'application/json': { schema } } }, '401': { $ref: '#/components/responses/Unauthenticated' }, '403': { $ref: '#/components/responses/Forbidden' }, '429': { $ref: '#/components/responses/RateLimited' } });
   const money = { type: 'integer', description: 'Centavos' };
+  const pid = { name: 'id', in: 'path', required: true, schema: { type: 'string' } };
+  const body = (properties: any, required: string[] = []) => ({ content: { 'application/json': { schema: { type: 'object', required, properties } } } });
   return {
     openapi: '3.1.0',
     info: {
@@ -59,12 +61,41 @@ export function buildPublicSpec() {
       '/refunds': { get: op('Listar reembolsos', 'sales:read', { parameters: paging, responses: ok(list('Refund')) }) },
       '/subscriptions': { get: op('Listar assinaturas', 'sales:read', { parameters: [...paging, { name: 'status', in: 'query', schema: { type: 'string' } }], responses: ok(list('Subscription')) }) },
       '/customers': { get: op('Listar compradores (dados completos)', 'customers:read', { parameters: paging, responses: ok(list('Customer')) }) },
-      '/products': { get: op('Listar produtos e ofertas', 'products:read', { responses: ok(list('Product')) }) },
+      '/products': {
+        get: op('Listar produtos e ofertas', 'products:read', { responses: ok(list('Product')) }),
+        post: op('Criar produto (com a primeira oferta)', 'products:write', { requestBody: body({ type: { type: 'string', enum: ['course', 'file', 'service', 'subscription'] }, name: { type: 'string' }, price_cents: { type: 'integer' }, interval: { type: 'string', enum: ['month', 'quarter', 'semester', 'year'] } }, ['type', 'name', 'price_cents']), responses: ok({ type: 'object', properties: { product_id: { type: 'string' }, offer_id: { type: 'string' }, status: { type: 'string' } } }) }),
+      },
       '/coupons': {
         get: op('Listar cupons', 'products:read', { responses: ok(list('Coupon')) }),
         post: op('Criar cupom', 'coupons:write', { requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['code', 'kind', 'value'], properties: { code: { type: 'string' }, kind: { type: 'string', enum: ['percent', 'fixed'] }, value: { type: 'integer' }, offer_ids: { type: 'array', items: { type: 'string' } }, ends_at: { type: 'string', format: 'date-time' }, max_uses: { type: 'integer' }, max_uses_per_cpf: { type: 'integer' } } } } } }, responses: ok({ $ref: '#/components/schemas/Coupon' }) }),
       },
       '/coupons/{id}': { patch: op('Ativar/desativar ou mudar validade de cupom', 'coupons:write', { parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { active: { type: 'boolean' }, ends_at: { type: ['string', 'null'] }, max_uses: { type: ['integer', 'null'] } } } } } }, responses: ok({ $ref: '#/components/schemas/Coupon' }) }) },
+      '/products/{id}': {
+        get: op('Um produto com ofertas, order bumps, upsell, conteúdo e materiais', 'products:read', { parameters: [pid], responses: ok({ type: 'object' }) }),
+        patch: op('Alterar produto', 'products:write', { description: 'Nome, descrição, capa (URL), garantia, afiliação (comissão, cookie, aprovação), vitrine de afiliados (marketplace_listed, category, affiliate_rules).', parameters: [pid], requestBody: body({ name: { type: 'string' }, description: { type: 'string' }, cover_url: { type: 'string' }, guarantee_days: { type: 'integer' }, affiliation_enabled: { type: 'boolean' }, affiliation_auto_approve: { type: 'boolean' }, affiliate_commission_bps: { type: 'integer' }, affiliate_cookie_days: { type: 'integer' }, marketplace_listed: { type: 'boolean' }, category: { type: 'string' }, affiliate_rules: { type: 'string' } }), responses: ok({ type: 'object' }) }),
+        delete: op('Excluir produto (as ofertas param de vender)', 'products:write', { parameters: [pid], responses: ok({ type: 'object' }) }),
+      },
+      '/products/{id}/publish': { post: op('Publicar (moderação automática; pode voltar in_review)', 'products:write', { parameters: [pid], responses: ok({ type: 'object', properties: { status: { type: 'string', enum: ['active', 'in_review'] }, checkout_url: { type: 'string' } } }) }) },
+      '/products/{id}/offers': { post: op('Nova oferta do produto', 'products:write', { parameters: [pid], requestBody: body({ name: { type: 'string' }, price_cents: { type: 'integer' }, methods: { type: 'array', items: { type: 'string', enum: ['pix', 'card', 'boleto'] } }, max_installments: { type: 'integer' } }, ['name', 'price_cents']), responses: ok({ type: 'object' }) }) },
+      '/offers/{id}': { patch: op('Alterar oferta', 'products:write', { description: 'Preço, formas de pagamento, parcelas e juros, limite de vendas, fim da oferta, validade do Pix e do boleto, página de obrigado própria, comissão de afiliado da oferta, status (active/paused).', parameters: [pid], requestBody: body({ name: { type: 'string' }, price_cents: { type: 'integer' }, methods: { type: 'array', items: { type: 'string' } }, max_installments: { type: 'integer' }, installment_interest: { type: 'string', enum: ['buyer', 'producer'] }, sales_limit: { type: ['integer', 'null'] }, ends_at: { type: ['string', 'null'] }, thank_you_url: { type: ['string', 'null'] }, affiliate_commission_bps: { type: ['integer', 'null'] }, status: { type: 'string', enum: ['active', 'paused'] } }), responses: ok({ type: 'object' }) }) },
+      '/offers/{id}/duplicate': { post: op('Duplicar oferta (mesma configuração, novo link)', 'products:write', { parameters: [pid], responses: ok({ type: 'object' }) }) },
+      '/offers/{id}/bumps': { put: op('Definir as ofertas especiais (order bump) do checkout', 'products:write', { description: 'Substitui a lista inteira; até 3 ofertas da sua conta. Lista vazia remove.', parameters: [pid], requestBody: body({ items: { type: 'array', items: { type: 'object', properties: { offer_id: { type: 'string' }, headline: { type: 'string' } } } } }, ['items']), responses: ok({ type: 'object' }) }) },
+      '/offers/{id}/funnel': { put: op('Definir upsell e downsell com 1 clique', 'products:write', { description: 'Ofertas de pagamento único da sua conta. upsell_offer_id null desliga.', parameters: [pid], requestBody: body({ upsell_offer_id: { type: ['string', 'null'] }, upsell_headline: { type: 'string' }, upsell_text: { type: 'string' }, downsell_offer_id: { type: ['string', 'null'] }, downsell_headline: { type: 'string' }, downsell_text: { type: 'string' } }, ['upsell_offer_id']), responses: ok({ type: 'object' }) }) },
+      '/products/{id}/modules': { post: op('Novo módulo do curso', 'products:write', { parameters: [pid], requestBody: body({ title: { type: 'string' } }, ['title']), responses: ok({ type: 'object' }) }) },
+      '/modules/{id}': { patch: op('Renomear ou reordenar módulo', 'products:write', { parameters: [pid], requestBody: body({ title: { type: 'string' }, position: { type: 'integer' } }), responses: ok({ type: 'object' }) }) },
+      '/modules/{id}/lessons': { post: op('Nova aula em texto ou link', 'products:write', { description: 'Vídeo, PDF e arquivos são enviados pelo painel.', parameters: [pid], requestBody: body({ title: { type: 'string' }, kind: { type: 'string', enum: ['text', 'link'] }, body: { type: 'string', description: 'Texto da aula ou a URL' } }, ['title', 'kind', 'body']), responses: ok({ type: 'object' }) }) },
+      '/lessons/{id}': {
+        patch: op('Alterar aula (texto, liberação programada, módulo)', 'products:write', { parameters: [pid], requestBody: body({ title: { type: 'string' }, body: { type: 'string' }, drip_days: { type: ['integer', 'null'] }, drip_date: { type: ['string', 'null'] }, module_id: { type: 'string' } }), responses: ok({ type: 'object' }) }),
+        delete: op('Excluir aula', 'products:write', { parameters: [pid], responses: ok({ type: 'object' }) }),
+      },
+      '/products/{id}/materials': { post: op('Material de divulgação para afiliados', 'products:write', { parameters: [pid], requestBody: body({ kind: { type: 'string', enum: ['link', 'text'] }, title: { type: 'string' }, url: { type: 'string' }, body: { type: 'string' } }, ['kind', 'title']), responses: ok({ type: 'object' }) }) },
+      '/materials/{id}': { delete: op('Remover material', 'products:write', { parameters: [pid], responses: ok({ type: 'object' }) }) },
+      '/products/{id}/experiments': {
+        get: op('Testes A/B do produto, com resultados', 'products:read', { parameters: [pid], responses: ok({ type: 'array' }) }),
+        post: op('Começar teste A/B', 'products:write', { parameters: [pid], requestBody: body({ name: { type: 'string' }, control_offer_id: { type: 'string' }, variant_offer_id: { type: 'string' }, split_pct: { type: 'integer' }, metric: { type: 'string', enum: ['conversion', 'revenue'] } }, ['name', 'control_offer_id', 'variant_offer_id']), responses: ok({ type: 'object' }) }),
+      },
+      '/experiments/{id}/{action}': { post: op('Pausar, retomar ou encerrar teste A/B', 'products:write', { description: 'action: pause | resume | end (com {"winner":"a"|"b"}).', parameters: [pid, { name: 'action', in: 'path', required: true, schema: { type: 'string', enum: ['pause', 'resume', 'end'] } }], responses: ok({ type: 'object' }) }) },
+      '/affiliates/{id}/{action}': { post: op('Aprovar ou bloquear afiliado', 'affiliates:write', { parameters: [pid, { name: 'action', in: 'path', required: true, schema: { type: 'string', enum: ['approve', 'block'] } }], responses: ok({ type: 'object' }) }) },
       '/affiliates': { get: op('Listar afiliados dos seus produtos', 'affiliates:read', { parameters: paging, responses: ok(list('Affiliate')) }) },
       '/webhooks': {
         get: op('Listar webhooks ativos', 'webhooks:write', { responses: ok(list('Webhook')) }),

@@ -5,7 +5,9 @@ export const SCOPES = {
   'sales:read': 'Ver vendas, reembolsos e assinaturas (nome e e-mail do comprador)',
   'customers:read': 'Ver dados pessoais completos dos compradores (telefone e CPF)',
   'products:read': 'Ver produtos, ofertas e cupons',
+  'products:write': 'Criar e configurar produtos, ofertas, oferta especial (order bump), upsell, conteúdo em texto/link, materiais e teste A/B',
   'affiliates:read': 'Ver afiliados e comissões',
+  'affiliates:write': 'Aprovar e bloquear afiliados',
   'coupons:write': 'Criar e desativar cupons',
   'webhooks:write': 'Criar e remover webhooks (usado por Zapier e n8n)',
 } as const;

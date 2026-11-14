@@ -22,6 +22,7 @@ import { RiskService } from './modules/risk/risk.service';
 import { RiskController } from './modules/risk/risk.controller';
 import { MarketplaceController } from './modules/affiliates/marketplace.controller';
 import { PublicApiController } from './modules/public-api/public-api.controller';
+import { PublicWriteController } from './modules/public-api/public-write.controller';
 import { ExperimentsController } from './modules/products/experiments.controller';
 import { ReportsController } from './modules/dashboard/reports.controller';
 import { CheckoutController } from './modules/checkout/checkout.controller';
@@ -53,12 +54,13 @@ function gatewayFactory() {
 
 @Module({
   imports: [EventEmitterModule.forRoot(), DiscoveryModule],
-  controllers: [RiskController, MarketplaceController, PublicApiController, ExperimentsController, ReportsController, 
+  controllers: [RiskController, MarketplaceController, PublicApiController, PublicWriteController, ExperimentsController, ReportsController, 
     HealthController, CheckoutController, WebhooksController, SandboxController, AuthController, CustomerController, OptOutController,
     ProductsController, MembersController, FilesController, DashboardController, KycController, AffiliatesController, SettingsController,
     AdminController, DevController, AdminOutboxController, DomainsController, AdjustmentsController, GoogleAuthController, PrivacyController,
   ],
   providers: [
+    ProductsController, ExperimentsController,
     PrismaService, AuditService, StorageService, QueueService, NotifyService, LedgerService, OrdersService, CheckoutService, FunnelService, RiskService, JobsService, FinanceService, PrivacyService,
     { provide: GATEWAY, useFactory: gatewayFactory },
     { provide: APP_GUARD, useClass: AuthGuard },
