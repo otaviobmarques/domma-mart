@@ -208,9 +208,13 @@ export class ProductsController {
     await this.ownOffer(c, id);
     const d = parse(z.object({ items: z.array(z.object({ offer_id: z.string().uuid(), headline: z.string().max(140).optional() })).max(3) }), b); // RN-23
     const valid = await this.prisma.offers.findMany({ where: { id: { in: d.items.map(i => i.offer_id) }, workspace_id: c.workspaceId } });
+    // erro claro em vez de ignorar: a API pública também usa esta regra
+    if (d.items.some(i => i.offer_id === id)) throw new AppError('VALIDATION_ERROR', { fields: { items: 'A oferta não pode ser a oferta especial dela mesma.' } });
+    if (new Set(d.items.map(i => i.offer_id)).size !== d.items.length) throw new AppError('VALIDATION_ERROR', { fields: { items: 'A mesma oferta aparece mais de uma vez.' } });
+    if (d.items.some(i => !valid.some(v => v.id === i.offer_id))) throw new AppError('VALIDATION_ERROR', { fields: { items: 'Use ofertas da sua conta.' } });
     await this.prisma.$transaction([
       this.prisma.offer_bumps.deleteMany({ where: { offer_id: id } }),
-      ...d.items.filter(i => valid.some(v => v.id === i.offer_id) && i.offer_id !== id).map((i, k) => this.prisma.offer_bumps.create({ data: { offer_id: id, bump_offer_id: i.offer_id, headline: i.headline, position: k } })),
+      ...d.items.map((i, k) => this.prisma.offer_bumps.create({ data: { offer_id: id, bump_offer_id: i.offer_id, headline: i.headline, position: k } })),
     ]);
     return { ok: true };
   }

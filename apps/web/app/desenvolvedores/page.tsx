@@ -14,7 +14,7 @@ export default function Desenvolvedores() {
   const [spec, setSpec] = useState<Spec | null>(null);
   useEffect(() => { fetch('/api/v1/openapi.json').then(r => r.json()).then(setSpec).catch(() => {}); }, []);
   const base = spec?.servers[0]?.url ?? 'https://domma-mart.vercel.app/api/v1';
-  const nav = [['inicio', 'Começo rápido'], ['autenticacao', 'Chaves e permissões'], ['formato', 'Formato, paginação e erros'], ['endpoints', 'Endpoints'], ['webhooks', 'Webhooks e assinatura'], ['zapier', 'Zapier'], ['n8n', 'n8n']];
+  const nav = [['inicio', 'Começo rápido'], ['autenticacao', 'Chaves e permissões'], ['formato', 'Formato, paginação e erros'], ['catalogo', 'Montar um produto'], ['endpoints', 'Endpoints'], ['webhooks', 'Webhooks e assinatura'], ['zapier', 'Zapier'], ['n8n', 'n8n']];
   return (
     <main className="mx-auto max-w-4xl px-4 py-10 text-[15.5px] leading-relaxed text-ink">
       <a href="/" aria-label="Início"><Logo /></a>
@@ -48,6 +48,33 @@ export default function Desenvolvedores() {
           <li>Erros seguem o padrão problem+json, com mensagem em português e um código estável:</li>
         </ul>
         <Code copy={false}>{`HTTP 403\n{ "code": "PERMISSION_DENIED", "title": "Esta chave não tem a permissão customers:read. ...", "status": 403 }`}</Code>
+      </section>
+
+      <section id="catalogo" className="mt-10 scroll-mt-6 space-y-3">
+        <h2 className="text-[21px] font-extrabold">Montar um produto pela API</h2>
+        <p className="text-ink-soft">Com a permissão <span className="num">products:write</span> dá para criar o produto inteiro sem abrir o painel: oferta, conteúdo em texto ou link, oferta especial (order bump), upsell com 1 clique, materiais de afiliado e teste A/B. As regras são as mesmas do painel, inclusive a análise automática ao publicar (o produto pode voltar <span className="num">in_review</span>). Vídeos, PDFs e a capa ainda são enviados pelo painel.</p>
+        <Code>{`K="Authorization: Bearer dm_live_SUA_CHAVE"; J="Content-Type: application/json"
+
+# 1. produto + primeira oferta
+curl -X POST ${base}/products -H "$K" -H "$J" \
+  -d '{ "type": "course", "name": "Curso de Bolos Caseiros", "price_cents": 29700 }'
+# → { "product_id": "...", "offer_id": "..." }
+
+# 2. conteúdo
+curl -X POST ${base}/products/PRODUCT_ID/modules -H "$K" -H "$J" -d '{ "title": "Começando" }'
+curl -X POST ${base}/modules/MODULE_ID/lessons -H "$K" -H "$J" \
+  -d '{ "title": "Boas-vindas", "kind": "text", "body": "Olá!" }'
+
+# 3. publicar
+curl -X POST ${base}/products/PRODUCT_ID/publish -H "$K"
+
+# 4. oferta especial (order bump) no checkout — lista completa, até 3
+curl -X PUT ${base}/offers/OFFER_ID/bumps -H "$K" -H "$J" \
+  -d '{ "items": [{ "offer_id": "OUTRA_OFERTA", "headline": "Adicione 1 hora de consultoria" }] }'
+
+# 5. upsell com 1 clique na página de obrigado
+curl -X PUT ${base}/offers/OFFER_ID/funnel -H "$K" -H "$J" \
+  -d '{ "upsell_offer_id": "OUTRA_OFERTA", "upsell_headline": "Que tal uma consultoria?" }'`}</Code>
       </section>
 
       <section id="endpoints" className="mt-10 scroll-mt-6 space-y-3">
